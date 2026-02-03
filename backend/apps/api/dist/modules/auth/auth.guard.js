@@ -38,7 +38,7 @@ let AppAuthGuard = class AppAuthGuard {
             ? await this.authService.verifyServiceToken(token)
             : await this.authService.verifyUserToken(token);
         request.user = {
-            type: isInternal ? "service" : "user",
+            auth_type: isInternal ? "service" : "user",
             ...payload
         };
         return true;

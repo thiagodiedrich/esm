@@ -35,7 +35,7 @@ export class AppAuthGuard implements CanActivate {
       : await this.authService.verifyUserToken(token);
 
     request.user = {
-      type: isInternal ? "service" : "user",
+      auth_type: isInternal ? "service" : "user",
       ...payload
     };
 

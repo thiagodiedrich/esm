@@ -5,6 +5,11 @@ import { AppController } from "./app.controller";
 import { AuthModule } from "./auth/auth.module";
 import { AppAuthGuard } from "./auth/auth.guard";
 import { RbacGuard } from "./rbac/rbac.guard";
+import { DatabaseModule } from "./database/database.module";
+import { AuthController } from "./auth/auth.controller";
+import { AuthTenantService } from "./auth/auth.tenant.service";
+import { AuthContextService } from "./context/context.service";
+import { ContextController } from "./context/context.controller";
 
 @Module({
   imports: [
@@ -12,9 +17,10 @@ import { RbacGuard } from "./rbac/rbac.guard";
       isGlobal: true,
       envFilePath: [".env"]
     }),
+    DatabaseModule,
     AuthModule
   ],
-  controllers: [AppController],
+  controllers: [AppController, AuthController, ContextController],
   providers: [
     {
       provide: APP_GUARD,
@@ -23,7 +29,9 @@ import { RbacGuard } from "./rbac/rbac.guard";
     {
       provide: APP_GUARD,
       useClass: RbacGuard
-    }
+    },
+    AuthTenantService,
+    AuthContextService
   ]
 })
 export class AppModule {}
