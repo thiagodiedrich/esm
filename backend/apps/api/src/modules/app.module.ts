@@ -10,6 +10,8 @@ import { AuthController } from "./auth/auth.controller";
 import { AuthTenantService } from "./auth/auth.tenant.service";
 import { AuthContextService } from "./context/context.service";
 import { ContextController } from "./context/context.controller";
+import { MenuController } from "./menu/menu.controller";
+import { MenuService } from "./menu/menu.service";
 
 @Module({
   imports: [
@@ -20,7 +22,7 @@ import { ContextController } from "./context/context.controller";
     DatabaseModule,
     AuthModule
   ],
-  controllers: [AppController, AuthController, ContextController],
+  controllers: [AppController, AuthController, ContextController, MenuController],
   providers: [
     {
       provide: APP_GUARD,
@@ -31,7 +33,8 @@ import { ContextController } from "./context/context.controller";
       useClass: RbacGuard
     },
     AuthTenantService,
-    AuthContextService
+    AuthContextService,
+    MenuService
   ]
 })
 export class AppModule {}

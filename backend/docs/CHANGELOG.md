@@ -15,6 +15,7 @@ Todas as mudancas relevantes deste projeto serao documentadas aqui.
 - Tabela `res_user_last_context` para remember_last_context.
 - Login com bcrypt e tenant resolvido por Host/X-Tenant-Slug.
 - Context switch com reemissao de tokens e regras de workspace.
+- Menu backend (`GET /api/menu`) com cache e regras de bloqueio.
 
 ### Observacoes
-- Esta versao cobre as Fases 0, 0.2, 1, 2 e 3.
+- Esta versao cobre as Fases 0, 0.2, 1, 2, 3 e 4.

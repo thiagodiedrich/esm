@@ -19,6 +19,8 @@ const auth_controller_1 = require("./auth/auth.controller");
 const auth_tenant_service_1 = require("./auth/auth.tenant.service");
 const context_service_1 = require("./context/context.service");
 const context_controller_1 = require("./context/context.controller");
+const menu_controller_1 = require("./menu/menu.controller");
+const menu_service_1 = require("./menu/menu.service");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -32,7 +34,7 @@ exports.AppModule = AppModule = __decorate([
             database_module_1.DatabaseModule,
             auth_module_1.AuthModule
         ],
-        controllers: [app_controller_1.AppController, auth_controller_1.AuthController, context_controller_1.ContextController],
+        controllers: [app_controller_1.AppController, auth_controller_1.AuthController, context_controller_1.ContextController, menu_controller_1.MenuController],
         providers: [
             {
                 provide: core_1.APP_GUARD,
@@ -43,7 +45,8 @@ exports.AppModule = AppModule = __decorate([
                 useClass: rbac_guard_1.RbacGuard
             },
             auth_tenant_service_1.AuthTenantService,
-            context_service_1.AuthContextService
+            context_service_1.AuthContextService,
+            menu_service_1.MenuService
         ]
     })
 ], AppModule);
