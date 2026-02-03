@@ -1,7 +1,7 @@
 # Fase 1 — ERD
 
 ## Status
-Pendente.
+Concluida.
 
 ## Objetivo
 Implementar os schemas e migrations SQL conforme o ERD definido.
@@ -23,6 +23,9 @@ Implementar os schemas e migrations SQL conforme o ERD definido.
 - tenant_platform_product_modules
 - res_organization_settings
 - tenant_usage_metrics
+
+## Implementacao
+- Migration SQL criada em `migrations/control-plane/2026020301__phase1_erd.sql`.
 
 ## Observacoes
 - Somente migrations SQL.
