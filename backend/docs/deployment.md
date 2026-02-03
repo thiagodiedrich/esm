@@ -4,24 +4,23 @@
 Em definicao. Apenas fluxo local foi validado.
 
 ## Desenvolvimento local
-1. Instalar dependencias:
-   - `npm install`
-2. Gerar chaves RS256:
+1. Instalar Docker:
+   - Windows: Docker Desktop (com WSL2 habilitado)
+   - Linux: Docker Engine + Docker Compose plugin
+2. Configurar `.env` do projeto:
+   - `cp .env.example .env`
+   - Para Docker: use `POSTGRES_HOST=postgres`, `KAFKA_BROKERS=kafka:9092`,
+     `MINIO_ENDPOINT=http://minio:9000`, `REDIS_URL=redis://redis:6379`
+3. Subir infraestrutura local (Postgres, Redis, Kafka KRaft, MinIO):
+   - `docker compose -f docker-compose.yml up -d --build`
+4. Rodar migrations (via container Python):
+   - `docker compose --profile migrations run --rm migrations-runner`
+5. Gerar chaves RS256 (opcional se usar HS256 em dev):
    - `New-Item -ItemType Directory -Force -Path apps\api\keys`
    - `openssl genrsa -out apps\api\keys\jwt_private.pem 2048`
    - `openssl rsa -in apps\api\keys\jwt_private.pem -pubout -out apps\api\keys\jwt_public.pem`
-3. Configurar `.env`:
-   - `JWT_PRIVATE_KEY_PATH=./keys/jwt_private.pem`
-   - `JWT_PUBLIC_KEY_PATH=./keys/jwt_public.pem`
-   - `JWT_ALGORITHM=RS256`
-   - `CONTROL_PLANE_DATABASE_URL=postgres://user:pass@localhost:5432/control_plane`
-   - `DB_CATALOG__ERP_MAIN=postgres://user:pass@localhost:5432/erp_main`
-   - `KAFKA_ENABLED=false`
-   - `KAFKA_CLIENT_ID=esm-api`
-   - `KAFKA_BROKERS=localhost:9092`
-   - `SERVICE_NAME=esm-api`
-4. Subir API:
-   - `npm run dev:api`
+6. Subir API:
+   - `docker compose up -d --build`
 
 ## Troubleshooting
 - `openssl` nao encontrado:

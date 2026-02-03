@@ -24,8 +24,7 @@ import { TenantMigrationService } from "./tenants/tenant-migration.service";
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: [".env"]
+      isGlobal: true
     }),
     DatabaseModule,
     DbRouterModule,

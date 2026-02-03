@@ -15,7 +15,14 @@ export class CorrelationMiddleware implements NestMiddleware {
         : randomUUID();
 
     req.correlationId = correlationId;
-    res.header("x-correlation-id", correlationId);
+    if (typeof (res as FastifyReply).header === "function") {
+      res.header("x-correlation-id", correlationId);
+    } else if (res && typeof (res as unknown as { setHeader?: Function }).setHeader === "function") {
+      (res as unknown as { setHeader: (name: string, value: string) => void }).setHeader(
+        "x-correlation-id",
+        correlationId
+      );
+    }
 
     this.requestContext.run({ correlationId }, () => next());
   }

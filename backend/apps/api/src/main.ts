@@ -16,8 +16,9 @@ async function bootstrap() {
   const serviceName = config.get<string>("SERVICE_NAME") || "esm-api";
   app.useLogger(new JsonLoggerService(requestContext, serviceName));
   const port = Number(config.get("PORT")) || 3000;
+  const host = config.get<string>("HOST") || "0.0.0.0";
 
-  await app.listen(port, "0.0.0.0");
+  await app.listen(port, host);
 }
 
 bootstrap();
