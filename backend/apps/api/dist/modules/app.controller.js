@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppController = void 0;
 const common_1 = require("@nestjs/common");
+const auth_decorators_1 = require("./auth/auth.decorators");
 let AppController = class AppController {
     health() {
         return { status: "ok" };
@@ -18,6 +19,7 @@ let AppController = class AppController {
 };
 exports.AppController = AppController;
 __decorate([
+    (0, auth_decorators_1.Public)(),
     (0, common_1.Get)("/health"),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),

@@ -1,16 +1,18 @@
 # Analise de Seguranca
 
 ## Status
-Em andamento. Escopo atual limitado as Fases 0 e 0.2.
+Em andamento. Escopo atual limitado as Fases 0, 0.2 e 1, com Fase 2 implementada.
 
 ## Escopo atual
 - API NestJS com Fastify adapter.
 - Configuracao via `.env`.
-- Sem autenticacao, sem RBAC, sem banco de dados.
+- JWT RS256 com chaves em arquivo.
+- Tokens stateless (refresh e service tokens).
+- RBAC por resource + action via decorator.
 
 ## Riscos atuais conhecidos
-- Nao ha controle de acesso implementado (a ser enderecado na Fase 2).
-- Nao ha persistencia de dados ainda (Fase 1).
+- Revogacao depende de expiracao e rotacao de chaves.
+- Emissao de tokens e resolucao de permissoes ainda nao implementadas.
 
 ## Controles planejados
 - JWT RS256.
