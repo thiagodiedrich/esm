@@ -25,6 +25,10 @@ const observability_module_1 = require("./observability/observability.module");
 const correlation_middleware_1 = require("./observability/correlation.middleware");
 const db_router_module_1 = require("./db-router/db-router.module");
 const kafka_module_1 = require("./kafka/kafka.module");
+const usage_controller_1 = require("./usage/usage.controller");
+const usage_service_1 = require("./usage/usage.service");
+const tenant_migration_controller_1 = require("./tenants/tenant-migration.controller");
+const tenant_migration_service_1 = require("./tenants/tenant-migration.service");
 let AppModule = class AppModule {
     configure(consumer) {
         consumer.apply(correlation_middleware_1.CorrelationMiddleware).forRoutes("*");
@@ -44,7 +48,14 @@ exports.AppModule = AppModule = __decorate([
             kafka_module_1.KafkaModule,
             auth_module_1.AuthModule
         ],
-        controllers: [app_controller_1.AppController, auth_controller_1.AuthController, context_controller_1.ContextController, menu_controller_1.MenuController],
+        controllers: [
+            app_controller_1.AppController,
+            auth_controller_1.AuthController,
+            context_controller_1.ContextController,
+            menu_controller_1.MenuController,
+            usage_controller_1.UsageController,
+            tenant_migration_controller_1.TenantMigrationController
+        ],
         providers: [
             {
                 provide: core_1.APP_GUARD,
@@ -56,7 +67,9 @@ exports.AppModule = AppModule = __decorate([
             },
             auth_tenant_service_1.AuthTenantService,
             context_service_1.AuthContextService,
-            menu_service_1.MenuService
+            menu_service_1.MenuService,
+            usage_service_1.UsageService,
+            tenant_migration_service_1.TenantMigrationService
         ]
     })
 ], AppModule);

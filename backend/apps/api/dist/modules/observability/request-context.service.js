@@ -22,6 +22,21 @@ let RequestContextService = class RequestContextService {
     getTenantId() {
         return this.storage.getStore()?.tenantId;
     }
+    getOrganizationId() {
+        return this.storage.getStore()?.organizationId;
+    }
+    getWorkspaceId() {
+        return this.storage.getStore()?.workspaceId;
+    }
+    updateUserContext(params) {
+        const store = this.storage.getStore();
+        if (!store) {
+            return;
+        }
+        store.tenantId = params.tenantId ?? store.tenantId;
+        store.organizationId = params.organizationId ?? store.organizationId;
+        store.workspaceId = params.workspaceId ?? store.workspaceId;
+    }
 };
 exports.RequestContextService = RequestContextService;
 exports.RequestContextService = RequestContextService = __decorate([

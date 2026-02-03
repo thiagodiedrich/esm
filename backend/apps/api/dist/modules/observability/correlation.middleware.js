@@ -24,8 +24,7 @@ let CorrelationMiddleware = class CorrelationMiddleware {
             : (0, crypto_1.randomUUID)();
         req.correlationId = correlationId;
         res.header("x-correlation-id", correlationId);
-        const tenantId = req.user?.tenant_id;
-        this.requestContext.run({ correlationId, tenantId }, () => next());
+        this.requestContext.run({ correlationId }, () => next());
     }
 };
 exports.CorrelationMiddleware = CorrelationMiddleware;

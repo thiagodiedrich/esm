@@ -18,6 +18,9 @@ Todas as mudancas relevantes deste projeto serao documentadas aqui.
 - Menu backend (`GET /api/menu`) com cache e regras de bloqueio.
 - Multi-DB com catalogo `DB_CATALOG__*` e roteamento por tenant.
 - Kafka (kafkajs) com correlation id e toggle via `KAFKA_ENABLED`.
+- Logs JSON estruturados e correlation id obrigatorio.
+- Endpoint interno de usage metrics.
+- Endpoint interno para ponteiros de tenant e status de migracao.
 
 ### Observacoes
-- Esta versao cobre as Fases 0, 0.2, 1, 2, 3, 4 e 5.
+- Esta versao cobre as Fases 0, 0.2, 1, 2, 3, 4, 5 e 6.

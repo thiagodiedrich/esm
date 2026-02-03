@@ -19,6 +19,7 @@ Em definicao. Apenas fluxo local foi validado.
    - `KAFKA_ENABLED=false`
    - `KAFKA_CLIENT_ID=esm-api`
    - `KAFKA_BROKERS=localhost:9092`
+   - `SERVICE_NAME=esm-api`
 4. Subir API:
    - `npm run dev:api`
 
@@ -33,6 +34,13 @@ Em definicao. Apenas fluxo local foi validado.
   - Confirme se o Postgres esta acessivel.
 - Erro ao resolver catalogo:
   - Verifique as variaveis `DB_CATALOG__*`.
+
+## Migrations (manual)
+- SQL puro, sem auto-run.
+- Diretorios:
+  - `backend/migrations/control-plane`
+  - `backend/migrations/erp`
+  - `backend/migrations/telemetry`
 
 ## Producao
 Pendente de definicao nas fases posteriores (infra e observabilidade).

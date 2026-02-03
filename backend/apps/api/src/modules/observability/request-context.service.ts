@@ -4,6 +4,8 @@ import { AsyncLocalStorage } from "async_hooks";
 interface RequestContextStore {
   correlationId: string;
   tenantId?: string;
+  organizationId?: string;
+  workspaceId?: string | null;
 }
 
 @Injectable()
@@ -20,5 +22,28 @@ export class RequestContextService {
 
   getTenantId(): string | undefined {
     return this.storage.getStore()?.tenantId;
+  }
+
+  getOrganizationId(): string | undefined {
+    return this.storage.getStore()?.organizationId;
+  }
+
+  getWorkspaceId(): string | null | undefined {
+    return this.storage.getStore()?.workspaceId;
+  }
+
+  updateUserContext(params: {
+    tenantId?: string;
+    organizationId?: string;
+    workspaceId?: string | null;
+  }) {
+    const store = this.storage.getStore();
+    if (!store) {
+      return;
+    }
+
+    store.tenantId = params.tenantId ?? store.tenantId;
+    store.organizationId = params.organizationId ?? store.organizationId;
+    store.workspaceId = params.workspaceId ?? store.workspaceId;
   }
 }

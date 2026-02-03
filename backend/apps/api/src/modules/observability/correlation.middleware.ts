@@ -17,7 +17,6 @@ export class CorrelationMiddleware implements NestMiddleware {
     req.correlationId = correlationId;
     res.header("x-correlation-id", correlationId);
 
-    const tenantId = req.user?.tenant_id;
-    this.requestContext.run({ correlationId, tenantId }, () => next());
+    this.requestContext.run({ correlationId }, () => next());
   }
 }

@@ -3,12 +3,14 @@ import { Reflector } from "@nestjs/core";
 import { FastifyRequest } from "fastify";
 import { IS_PUBLIC_KEY } from "./auth.constants";
 import { AuthService } from "./auth.service";
+import { RequestContextService } from "../observability/request-context.service";
 
 @Injectable()
 export class AppAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    private readonly requestContext: RequestContextService
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -38,6 +40,12 @@ export class AppAuthGuard implements CanActivate {
       auth_type: isInternal ? "service" : "user",
       ...payload
     };
+
+    this.requestContext.updateUserContext({
+      tenantId: payload.tenant_id,
+      organizationId: payload.organization_id,
+      workspaceId: payload.workspace_id ?? null
+    });
 
     return true;
   }

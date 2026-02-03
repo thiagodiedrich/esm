@@ -1,7 +1,7 @@
 # Fase 6 — Evolution
 
 ## Status
-Pendente.
+Concluida.
 
 ## Objetivo
 Preparar evolucao e operacao do produto.
@@ -13,3 +13,10 @@ Preparar evolucao e operacao do produto.
 - Usage metrics (pre-billing)
 - Regras multi-language
 - Prompt Master respeitado
+
+## Implementacao
+- Endpoints internos para atualizar ponteiros de tenant e status de migracao.
+- Diretorios de migrations separados por DB: `control-plane`, `erp`, `telemetry`.
+- Logs estruturados JSON com `X-Correlation-Id`.
+- Endpoint interno `POST /internal/usage/metrics`.
+- Regras multi-language e Prompt Master apenas documentadas.

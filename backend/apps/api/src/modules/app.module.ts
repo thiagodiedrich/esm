@@ -16,6 +16,10 @@ import { ObservabilityModule } from "./observability/observability.module";
 import { CorrelationMiddleware } from "./observability/correlation.middleware";
 import { DbRouterModule } from "./db-router/db-router.module";
 import { KafkaModule } from "./kafka/kafka.module";
+import { UsageController } from "./usage/usage.controller";
+import { UsageService } from "./usage/usage.service";
+import { TenantMigrationController } from "./tenants/tenant-migration.controller";
+import { TenantMigrationService } from "./tenants/tenant-migration.service";
 
 @Module({
   imports: [
@@ -29,7 +33,14 @@ import { KafkaModule } from "./kafka/kafka.module";
     KafkaModule,
     AuthModule
   ],
-  controllers: [AppController, AuthController, ContextController, MenuController],
+  controllers: [
+    AppController,
+    AuthController,
+    ContextController,
+    MenuController,
+    UsageController,
+    TenantMigrationController
+  ],
   providers: [
     {
       provide: APP_GUARD,
@@ -41,7 +52,9 @@ import { KafkaModule } from "./kafka/kafka.module";
     },
     AuthTenantService,
     AuthContextService,
-    MenuService
+    MenuService,
+    UsageService,
+    TenantMigrationService
   ]
 })
 export class AppModule implements NestModule {

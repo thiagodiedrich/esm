@@ -14,10 +14,12 @@ const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const auth_constants_1 = require("./auth.constants");
 const auth_service_1 = require("./auth.service");
+const request_context_service_1 = require("../observability/request-context.service");
 let AppAuthGuard = class AppAuthGuard {
-    constructor(reflector, authService) {
+    constructor(reflector, authService, requestContext) {
         this.reflector = reflector;
         this.authService = authService;
+        this.requestContext = requestContext;
     }
     async canActivate(context) {
         const isPublic = this.reflector.getAllAndOverride(auth_constants_1.IS_PUBLIC_KEY, [
@@ -41,6 +43,11 @@ let AppAuthGuard = class AppAuthGuard {
             auth_type: isInternal ? "service" : "user",
             ...payload
         };
+        this.requestContext.updateUserContext({
+            tenantId: payload.tenant_id,
+            organizationId: payload.organization_id,
+            workspaceId: payload.workspace_id ?? null
+        });
         return true;
     }
 };
@@ -48,5 +55,6 @@ exports.AppAuthGuard = AppAuthGuard;
 exports.AppAuthGuard = AppAuthGuard = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [core_1.Reflector,
-        auth_service_1.AuthService])
+        auth_service_1.AuthService,
+        request_context_service_1.RequestContextService])
 ], AppAuthGuard);
