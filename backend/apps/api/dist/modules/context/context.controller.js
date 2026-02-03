@@ -23,7 +23,7 @@ let ContextController = class ContextController {
     }
     async switchContext(body, request) {
         const user = request.user;
-        if (!user || user.type !== "access") {
+        if (!user || user.auth_type !== "user" || user.type !== "access") {
             throw new common_1.UnauthorizedException("Access token necessario.");
         }
         const context = await this.contextService.switchContext({

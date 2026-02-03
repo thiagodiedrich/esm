@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_GUARD } from "@nestjs/core";
 import { AppController } from "./app.controller";
@@ -12,6 +12,10 @@ import { AuthContextService } from "./context/context.service";
 import { ContextController } from "./context/context.controller";
 import { MenuController } from "./menu/menu.controller";
 import { MenuService } from "./menu/menu.service";
+import { ObservabilityModule } from "./observability/observability.module";
+import { CorrelationMiddleware } from "./observability/correlation.middleware";
+import { DbRouterModule } from "./db-router/db-router.module";
+import { KafkaModule } from "./kafka/kafka.module";
 
 @Module({
   imports: [
@@ -20,6 +24,9 @@ import { MenuService } from "./menu/menu.service";
       envFilePath: [".env"]
     }),
     DatabaseModule,
+    DbRouterModule,
+    ObservabilityModule,
+    KafkaModule,
     AuthModule
   ],
   controllers: [AppController, AuthController, ContextController, MenuController],
@@ -37,4 +44,8 @@ import { MenuService } from "./menu/menu.service";
     MenuService
   ]
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationMiddleware).forRoutes("*");
+  }
+}

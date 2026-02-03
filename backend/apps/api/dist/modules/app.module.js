@@ -21,7 +21,14 @@ const context_service_1 = require("./context/context.service");
 const context_controller_1 = require("./context/context.controller");
 const menu_controller_1 = require("./menu/menu.controller");
 const menu_service_1 = require("./menu/menu.service");
+const observability_module_1 = require("./observability/observability.module");
+const correlation_middleware_1 = require("./observability/correlation.middleware");
+const db_router_module_1 = require("./db-router/db-router.module");
+const kafka_module_1 = require("./kafka/kafka.module");
 let AppModule = class AppModule {
+    configure(consumer) {
+        consumer.apply(correlation_middleware_1.CorrelationMiddleware).forRoutes("*");
+    }
 };
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
@@ -32,6 +39,9 @@ exports.AppModule = AppModule = __decorate([
                 envFilePath: [".env"]
             }),
             database_module_1.DatabaseModule,
+            db_router_module_1.DbRouterModule,
+            observability_module_1.ObservabilityModule,
+            kafka_module_1.KafkaModule,
             auth_module_1.AuthModule
         ],
         controllers: [app_controller_1.AppController, auth_controller_1.AuthController, context_controller_1.ContextController, menu_controller_1.MenuController],

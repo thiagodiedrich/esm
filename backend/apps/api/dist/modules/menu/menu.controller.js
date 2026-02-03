@@ -21,7 +21,7 @@ let MenuController = class MenuController {
     }
     async getMenu(request) {
         const user = request.user;
-        if (!user || user.type !== "access") {
+        if (!user || user.auth_type !== "user" || user.type !== "access") {
             throw new common_1.UnauthorizedException("Access token necessario.");
         }
         return { items: await this.menuService.getMenu(user) };

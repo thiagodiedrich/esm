@@ -22,7 +22,7 @@ export class ContextController {
   ) {
     const user = request.user;
 
-    if (!user || user.type !== "access") {
+    if (!user || user.auth_type !== "user" || user.type !== "access") {
       throw new UnauthorizedException("Access token necessario.");
     }
 
