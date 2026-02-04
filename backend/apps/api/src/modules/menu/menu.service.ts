@@ -1,7 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Pool } from "pg";
 import { PG_POOL } from "../database/database.module";
 import { MenuItem, MENU_BASE } from "./menu.base";
+import Redis from "ioredis";
 import { AuthUser } from "../auth/auth.types";
 
 interface MenuCacheEntry {
@@ -24,8 +26,15 @@ interface ProductModuleRow {
 @Injectable()
 export class MenuService {
   private readonly cache = new Map<string, MenuCacheEntry>();
+  private readonly redis: Redis | null;
 
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly configService: ConfigService
+  ) {
+    const redisUrl = this.configService.get<string>("REDIS_URL");
+    this.redis = redisUrl ? new Redis(redisUrl) : null;
+  }
 
   async getMenu(user: AuthUser): Promise<MenuItem[]> {
     if (!user.tenant_id || !user.organization_id) {
@@ -34,9 +43,9 @@ export class MenuService {
 
     const cacheKey = `${user.tenant_id}:${user.organization_id}`;
     const now = Date.now();
-    const cached = this.cache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
-      return cached.items;
+    const cached = await this.getFromCache(cacheKey, now);
+    if (cached) {
+      return cached;
     }
 
     const [activeProducts, activeModules, ttlSeconds] = await Promise.all([
@@ -58,11 +67,38 @@ export class MenuService {
     });
 
     const ttlMs = Math.max(0, (ttlSeconds ?? 0) * 1000);
-    if (ttlMs > 0) {
-      this.cache.set(cacheKey, { expiresAt: now + ttlMs, items: filtered });
-    }
+    await this.saveCache(cacheKey, filtered, ttlMs, now);
 
     return filtered;
+  }
+
+  private async getFromCache(cacheKey: string, now: number): Promise<MenuItem[] | null> {
+    if (this.redis) {
+      const value = await this.redis.get(`menu:${cacheKey}`);
+      if (value) {
+        return JSON.parse(value) as MenuItem[];
+      }
+    }
+
+    const cached = this.cache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.items;
+    }
+
+    return null;
+  }
+
+  private async saveCache(cacheKey: string, items: MenuItem[], ttlMs: number, now: number) {
+    if (ttlMs <= 0) {
+      return;
+    }
+
+    if (this.redis) {
+      await this.redis.set(`menu:${cacheKey}`, JSON.stringify(items), "PX", ttlMs);
+      return;
+    }
+
+    this.cache.set(cacheKey, { expiresAt: now + ttlMs, items });
   }
 
   private filterMenu(

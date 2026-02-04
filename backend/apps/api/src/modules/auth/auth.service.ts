@@ -28,6 +28,11 @@ interface UserRecord {
 
 @Injectable()
 export class AuthService {
+  private readonly loginAttempts = new Map<
+    string,
+    { count: number; blockedUntil?: number }
+  >();
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -56,26 +61,40 @@ export class AuthService {
   }
 
   async validateUserCredentials(tenantId: string, email: string, password: string) {
+    const key = `${tenantId}:${email.toLowerCase()}`;
+    this.assertNotBlocked(key);
+
     const result = await this.pool.query<UserRecord>(
       "SELECT id, password_hash, is_active FROM res_users WHERE tenant_id = $1 AND email = $2",
       [tenantId, email]
     );
 
     if (result.rowCount === 0) {
+      this.registerFailedAttempt(key);
       return null;
     }
 
     const user = result.rows[0];
     if (!user.is_active || !user.password_hash) {
+      this.registerFailedAttempt(key);
       return null;
     }
 
     const isValid = await bcrypt.compare(password, user.password_hash);
-    return isValid ? { id: user.id } : null;
+    if (!isValid) {
+      this.registerFailedAttempt(key);
+      return null;
+    }
+
+    this.clearFailedAttempts(key);
+    return { id: user.id };
   }
 
   async issueTokens(input: IssueTokensInput): Promise<IssuedTokens> {
-    const accessTtlSeconds = 15 * 60;
+    const accessMinutes = Number(
+      this.configService.get<string>("ACCESS_TOKEN_EXPIRE_MINUTES") || 15
+    );
+    const accessTtlSeconds = Math.max(1, accessMinutes) * 60;
     const refreshTtlSeconds = 7 * 24 * 60 * 60;
 
     const accessPayload: AuthUserPayload = {
@@ -102,5 +121,48 @@ export class AuthService {
       refresh_token: refreshToken,
       expires_in: accessTtlSeconds
     };
+  }
+
+  private assertNotBlocked(key: string) {
+    const config = this.getFailbanConfig();
+    if (!config) {
+      return;
+    }
+
+    const state = this.loginAttempts.get(key);
+    if (state?.blockedUntil && state.blockedUntil > Date.now()) {
+      throw new UnauthorizedException("Usuario bloqueado temporariamente.");
+    }
+  }
+
+  private registerFailedAttempt(key: string) {
+    const config = this.getFailbanConfig();
+    if (!config) {
+      return;
+    }
+
+    const current = this.loginAttempts.get(key) ?? { count: 0 };
+    const nextCount = current.count + 1;
+
+    if (nextCount >= config.maxAttempts) {
+      const blockedUntil = Date.now() + config.blockMinutes * 60 * 1000;
+      this.loginAttempts.set(key, { count: 0, blockedUntil });
+      return;
+    }
+
+    this.loginAttempts.set(key, { count: nextCount });
+  }
+
+  private clearFailedAttempts(key: string) {
+    this.loginAttempts.delete(key);
+  }
+
+  private getFailbanConfig() {
+    const maxAttempts = Number(this.configService.get("LOGIN_MAX_ATTEMPTS") ?? 0);
+    const blockMinutes = Number(this.configService.get("LOGIN_BLOCK_MINUTES") ?? 0);
+    if (maxAttempts > 0 && blockMinutes > 0) {
+      return { maxAttempts, blockMinutes };
+    }
+    return null;
   }
 }

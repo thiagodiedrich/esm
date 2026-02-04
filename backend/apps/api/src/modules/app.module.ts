@@ -14,12 +14,21 @@ import { MenuController } from "./menu/menu.controller";
 import { MenuService } from "./menu/menu.service";
 import { ObservabilityModule } from "./observability/observability.module";
 import { CorrelationMiddleware } from "./observability/correlation.middleware";
+import { AuditMiddleware } from "./observability/audit.middleware";
 import { DbRouterModule } from "./db-router/db-router.module";
 import { KafkaModule } from "./kafka/kafka.module";
 import { UsageController } from "./usage/usage.controller";
 import { UsageService } from "./usage/usage.service";
 import { TenantMigrationController } from "./tenants/tenant-migration.controller";
 import { TenantMigrationService } from "./tenants/tenant-migration.service";
+import { BrandingService } from "./branding/branding.service";
+import { BootstrapService } from "./bootstrap/bootstrap.service";
+import { StorageService } from "./storage/storage.service";
+import { AlertsService } from "./alerts/alerts.service";
+import { BrandingController } from "./branding/branding.controller";
+import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
+import { StorageController } from "./storage/storage.controller";
+import { TelemetryController } from "./telemetry/telemetry.controller";
 
 @Module({
   imports: [
@@ -37,6 +46,9 @@ import { TenantMigrationService } from "./tenants/tenant-migration.service";
     AuthController,
     ContextController,
     MenuController,
+    BrandingController,
+    StorageController,
+    TelemetryController,
     UsageController,
     TenantMigrationController
   ],
@@ -53,11 +65,15 @@ import { TenantMigrationService } from "./tenants/tenant-migration.service";
     AuthContextService,
     MenuService,
     UsageService,
-    TenantMigrationService
+    TenantMigrationService,
+    BrandingService,
+    BootstrapService,
+    StorageService,
+    AlertsService
   ]
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(CorrelationMiddleware).forRoutes("*");
+    consumer.apply(CorrelationMiddleware, TenancyMiddleware, AuditMiddleware).forRoutes("*");
   }
 }

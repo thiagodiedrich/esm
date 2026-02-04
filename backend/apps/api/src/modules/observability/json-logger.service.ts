@@ -3,10 +3,16 @@ import { RequestContextService } from "./request-context.service";
 
 type LogLevel = "log" | "error" | "warn" | "debug" | "verbose";
 
+interface LoggerOptions {
+  level: LogLevel;
+  format: "json" | "text";
+}
+
 export class JsonLoggerService implements LoggerService {
   constructor(
     private readonly requestContext: RequestContextService,
-    private readonly serviceName: string
+    private readonly serviceName: string,
+    private readonly options: LoggerOptions
   ) {}
 
   log(message: unknown, context?: string) {
@@ -30,6 +36,10 @@ export class JsonLoggerService implements LoggerService {
   }
 
   private write(level: LogLevel, message: unknown, context?: string, trace?: string) {
+    if (!shouldLog(level, this.options.level)) {
+      return;
+    }
+
     const logEntry = {
       timestamp: new Date().toISOString(),
       level,
@@ -44,6 +54,20 @@ export class JsonLoggerService implements LoggerService {
       trace
     };
 
+    if (this.options.format === "text") {
+      process.stdout.write(
+        `[${logEntry.timestamp}] ${logEntry.level.toUpperCase()} ${logEntry.service} ${
+          logEntry.context
+        }: ${logEntry.message}\n`
+      );
+      return;
+    }
+
     process.stdout.write(`${JSON.stringify(logEntry)}\n`);
   }
+}
+
+function shouldLog(level: LogLevel, minLevel: LogLevel) {
+  const order: LogLevel[] = ["error", "warn", "log", "debug", "verbose"];
+  return order.indexOf(level) <= order.indexOf(minLevel);
 }

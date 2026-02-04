@@ -2,6 +2,23 @@
 
 Todas as mudancas relevantes deste projeto serao documentadas aqui.
 
+## v1.7.0 - 2026-02-04
+
+### Adicionado
+- Swagger atualizado para rotas de Telemetry e Storage internos.
+- Guardrails no download interno (bucket fixo, rate-limit opcional, escopo por tenant).
+- Filtro global de excecoes para respostas amigaveis quando servicos/DB caem.
+- Retry de bootstrap para tolerar indisponibilidade do Postgres.
+
+### Ajustado
+- Login com fallback para TENANT_DEFAULT_ID quando multi-tenant estiver desligado.
+- Resolucao de tenant ignora host localhost/IP para testes via Swagger.
+- MinIO putObject com size correto e DTOs Swagger com tipagem strict.
+- Composicao do Postgres sem shell para evitar execucao como root.
+
+### Observacoes
+- Esta versao cobre as Fases 0, 0.2, 1, 2, 3, 4, 5, 6 e 7 (base).
+
 ## v1.2.0 - 2026-02-03
 
 ### Adicionado

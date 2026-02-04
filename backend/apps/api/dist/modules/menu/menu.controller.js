@@ -14,7 +14,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MenuController = void 0;
 const common_1 = require("@nestjs/common");
+const swagger_1 = require("@nestjs/swagger");
 const menu_service_1 = require("./menu.service");
+class MenuResponseDto {
+}
+__decorate([
+    (0, swagger_1.ApiProperty)({ type: "array", items: { type: "object" } }),
+    __metadata("design:type", Array)
+], MenuResponseDto.prototype, "items", void 0);
 let MenuController = class MenuController {
     constructor(menuService) {
         this.menuService = menuService;
@@ -30,12 +37,16 @@ let MenuController = class MenuController {
 exports.MenuController = MenuController;
 __decorate([
     (0, common_1.Get)(),
+    (0, swagger_1.ApiOperation)({ summary: "Retorna o menu do usuario logado" }),
+    (0, swagger_1.ApiBearerAuth)("userAuth"),
+    (0, swagger_1.ApiOkResponse)({ type: MenuResponseDto }),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], MenuController.prototype, "getMenu", null);
 exports.MenuController = MenuController = __decorate([
+    (0, swagger_1.ApiTags)("Menu"),
     (0, common_1.Controller)("/api/menu"),
     __metadata("design:paramtypes", [menu_service_1.MenuService])
 ], MenuController);

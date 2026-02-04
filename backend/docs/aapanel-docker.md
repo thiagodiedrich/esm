@@ -31,6 +31,7 @@ Cada modulo roda em um container separado:
 2. Copie o exemplo dos workers:
    - `cp workers-python/telemetry-worker/.env.example workers-python/telemetry-worker/.env`
    - `cp workers-python/erp-worker/.env.example workers-python/erp-worker/.env`
+   - `cp workers-python/webhook/.env.example workers-python/webhook/.env`
 3. Ajuste `SERVICE_TOKEN` em cada worker.
 
 ## 5) Subir os containers

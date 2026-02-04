@@ -1,5 +1,7 @@
 # esm
 
+Versao: v1.7.0
+
 ## Fase 0 — Stack (NestJS + Fastify)
 
 Implementado o bootstrap do API com NestJS e Fastify adapter, usando somente

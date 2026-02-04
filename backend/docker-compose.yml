@@ -6,6 +6,19 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DEBUG: ${POSTGRES_DEBUG}
+      POSTGRES_LOG_STATEMENT: ${POSTGRES_LOG_STATEMENT}
+      POSTGRES_LOG_DURATION: ${POSTGRES_LOG_DURATION}
+    command:
+      [
+        "postgres",
+        "-c",
+        "log_statement=${POSTGRES_LOG_STATEMENT}",
+        "-c",
+        "log_duration=${POSTGRES_LOG_DURATION}",
+        "-c",
+        "log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT:-1}"
+      ]
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
@@ -90,6 +103,17 @@ services:
     profiles: ["workers"]
     depends_on:
       - kafka
+      - api
+
+  webhook-worker:
+    build:
+      context: ./workers-python/webhook
+      dockerfile: Dockerfile
+    container_name: esm-webhook-worker
+    env_file:
+      - workers-python/webhook/.env
+    profiles: ["workers"]
+    depends_on:
       - api
 
   migrations-runner:

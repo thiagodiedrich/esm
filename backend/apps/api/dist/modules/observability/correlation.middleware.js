@@ -23,7 +23,12 @@ let CorrelationMiddleware = class CorrelationMiddleware {
             ? headerValue.trim()
             : (0, crypto_1.randomUUID)();
         req.correlationId = correlationId;
-        res.header("x-correlation-id", correlationId);
+        if (typeof res.header === "function") {
+            res.header("x-correlation-id", correlationId);
+        }
+        else if (res && typeof res.setHeader === "function") {
+            res.setHeader("x-correlation-id", correlationId);
+        }
         this.requestContext.run({ correlationId }, () => next());
     }
 };

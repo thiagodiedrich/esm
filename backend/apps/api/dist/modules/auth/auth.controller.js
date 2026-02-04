@@ -14,10 +14,35 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
+const swagger_1 = require("@nestjs/swagger");
 const auth_decorators_1 = require("./auth.decorators");
 const auth_service_1 = require("./auth.service");
 const auth_tenant_service_1 = require("./auth.tenant.service");
 const context_service_1 = require("../context/context.service");
+class LoginRequestDto {
+}
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: "admin@empresa.com" }),
+    __metadata("design:type", String)
+], LoginRequestDto.prototype, "email", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: "senhaSegura123" }),
+    __metadata("design:type", String)
+], LoginRequestDto.prototype, "password", void 0);
+class TokenResponseDto {
+}
+__decorate([
+    (0, swagger_1.ApiProperty)(),
+    __metadata("design:type", String)
+], TokenResponseDto.prototype, "access_token", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)(),
+    __metadata("design:type", String)
+], TokenResponseDto.prototype, "refresh_token", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ example: 900 }),
+    __metadata("design:type", Number)
+], TokenResponseDto.prototype, "expires_in", void 0);
 let AuthController = class AuthController {
     constructor(authService, tenantService, contextService) {
         this.authService = authService;
@@ -47,6 +72,9 @@ exports.AuthController = AuthController;
 __decorate([
     (0, auth_decorators_1.Public)(),
     (0, common_1.Post)("/login"),
+    (0, swagger_1.ApiOperation)({ summary: "Login de usuario" }),
+    (0, swagger_1.ApiBody)({ type: LoginRequestDto }),
+    (0, swagger_1.ApiOkResponse)({ type: TokenResponseDto }),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, common_1.Req)()),
     __metadata("design:type", Function),
@@ -54,6 +82,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
 exports.AuthController = AuthController = __decorate([
+    (0, swagger_1.ApiTags)("Auth"),
     (0, common_1.Controller)("/api/auth"),
     __metadata("design:paramtypes", [auth_service_1.AuthService,
         auth_tenant_service_1.AuthTenantService,
