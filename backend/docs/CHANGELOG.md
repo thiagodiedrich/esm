@@ -32,7 +32,7 @@ Todas as mudancas relevantes deste projeto serao documentadas aqui.
 - Tabela `res_user_last_context` para remember_last_context.
 - Login com bcrypt e tenant resolvido por Host/X-Tenant-Slug.
 - Context switch com reemissao de tokens e regras de workspace.
-- Menu backend (`GET /api/menu`) com cache e regras de bloqueio.
+- Menu backend (`GET /api/v1/menu`) com cache e regras de bloqueio.
 - Multi-DB com catalogo `DB_CATALOG__*` e roteamento por tenant.
 - Kafka (kafkajs) com correlation id e toggle via `KAFKA_ENABLED`.
 - Logs JSON estruturados e correlation id obrigatorio.

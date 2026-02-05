@@ -43,6 +43,34 @@ __decorate([
     (0, swagger_1.ApiProperty)({ example: 900 }),
     __metadata("design:type", Number)
 ], TokenResponseDto.prototype, "expires_in", void 0);
+class RefreshRequestDto {
+}
+__decorate([
+    (0, swagger_1.ApiProperty)(),
+    __metadata("design:type", String)
+], RefreshRequestDto.prototype, "refresh_token", void 0);
+class MeResponseDto {
+}
+__decorate([
+    (0, swagger_1.ApiProperty)(),
+    __metadata("design:type", String)
+], MeResponseDto.prototype, "id", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)(),
+    __metadata("design:type", String)
+], MeResponseDto.prototype, "tenant_id", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)(),
+    __metadata("design:type", String)
+], MeResponseDto.prototype, "email", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, nullable: true }),
+    __metadata("design:type", Object)
+], MeResponseDto.prototype, "partner_id", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, nullable: true }),
+    __metadata("design:type", Object)
+], MeResponseDto.prototype, "is_active", void 0);
 let AuthController = class AuthController {
     constructor(authService, tenantService, contextService) {
         this.authService = authService;
@@ -67,6 +95,40 @@ let AuthController = class AuthController {
         });
         return tokens;
     }
+    async refresh(body) {
+        if (!body?.refresh_token) {
+            throw new common_1.BadRequestException("Refresh token ausente.");
+        }
+        const payload = await this.authService.verifyUserToken(body.refresh_token);
+        if (payload.type !== "refresh" || !payload.tenant_id || !payload.sub) {
+            throw new common_1.UnauthorizedException("Refresh token invalido.");
+        }
+        const user = await this.authService.getUserById(payload.tenant_id, payload.sub);
+        if (!user || !user.is_active) {
+            throw new common_1.UnauthorizedException("Usuario inativo.");
+        }
+        const context = await this.contextService.resolveLoginContext(payload.tenant_id, payload.sub);
+        if (!context?.organizationId || !context?.workspaceId) {
+            throw new common_1.UnauthorizedException("Contexto invalido para login.");
+        }
+        return this.authService.issueTokens({
+            userId: payload.sub,
+            tenantId: payload.tenant_id,
+            organizationId: context.organizationId,
+            workspaceId: context.workspaceId
+        });
+    }
+    async me(request) {
+        const user = request.user;
+        if (!user || user.auth_type !== "user" || user.type !== "access") {
+            throw new common_1.UnauthorizedException("Access token necessario.");
+        }
+        const record = await this.authService.getUserById(user.tenant_id ?? "", user.sub);
+        if (!record) {
+            throw new common_1.UnauthorizedException("Usuario nao encontrado.");
+        }
+        return record;
+    }
 };
 exports.AuthController = AuthController;
 __decorate([
@@ -81,9 +143,30 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
+__decorate([
+    (0, auth_decorators_1.Public)(),
+    (0, common_1.Post)("/refresh"),
+    (0, swagger_1.ApiOperation)({ summary: "Refresh de token" }),
+    (0, swagger_1.ApiBody)({ type: RefreshRequestDto }),
+    (0, swagger_1.ApiOkResponse)({ type: TokenResponseDto }),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [RefreshRequestDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "refresh", null);
+__decorate([
+    (0, common_1.Get)("/me"),
+    (0, swagger_1.ApiOperation)({ summary: "Dados do usuario logado" }),
+    (0, swagger_1.ApiBearerAuth)("userAuth"),
+    (0, swagger_1.ApiOkResponse)({ type: MeResponseDto }),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "me", null);
 exports.AuthController = AuthController = __decorate([
-    (0, swagger_1.ApiTags)("Auth"),
-    (0, common_1.Controller)("/api/auth"),
+    (0, swagger_1.ApiTags)("Autenticação"),
+    (0, common_1.Controller)("/api/v1/auth"),
     __metadata("design:paramtypes", [auth_service_1.AuthService,
         auth_tenant_service_1.AuthTenantService,
         context_service_1.AuthContextService])

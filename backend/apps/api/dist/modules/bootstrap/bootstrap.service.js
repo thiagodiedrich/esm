@@ -1,0 +1,297 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+var BootstrapService_1;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BootstrapService = void 0;
+const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const pg_1 = require("pg");
+const crypto_1 = require("crypto");
+const bcrypt_1 = __importDefault(require("bcrypt"));
+const branding_service_1 = require("../branding/branding.service");
+const storage_service_1 = require("../storage/storage.service");
+const database_module_1 = require("../database/database.module");
+let BootstrapService = BootstrapService_1 = class BootstrapService {
+    constructor(configService, brandingService, storageService, pool) {
+        this.configService = configService;
+        this.brandingService = brandingService;
+        this.storageService = storageService;
+        this.pool = pool;
+        this.logger = new common_1.Logger(BootstrapService_1.name);
+        this.bootstrapRetryTimer = null;
+        this.bootstrapRetryMs = 10_000;
+    }
+    async onApplicationBootstrap() {
+        this.logWhiteLabelDefaults();
+        this.logStorageConfig();
+        try {
+            await this.runBootstrapTasks();
+        }
+        catch (error) {
+            this.logger.warn(`Bootstrap pendente: ${error.message}. Nova tentativa em ${this.bootstrapRetryMs / 1000}s.`);
+            this.scheduleBootstrapRetry();
+        }
+    }
+    async runBootstrapTasks() {
+        await this.bootstrapDefaultPlan();
+        await this.bootstrapMasterAdmin();
+    }
+    scheduleBootstrapRetry() {
+        if (this.bootstrapRetryTimer) {
+            return;
+        }
+        this.bootstrapRetryTimer = setTimeout(async () => {
+            this.bootstrapRetryTimer = null;
+            try {
+                await this.runBootstrapTasks();
+                this.logger.log("Bootstrap concluido apos reconexao.");
+            }
+            catch (error) {
+                this.logger.warn(`Bootstrap ainda pendente: ${error.message}. Nova tentativa em ${this.bootstrapRetryMs / 1000}s.`);
+                this.scheduleBootstrapRetry();
+            }
+        }, this.bootstrapRetryMs);
+    }
+    logWhiteLabelDefaults() {
+        const defaults = this.brandingService.getWhiteLabelDefaults();
+        if (!defaults.enabled) {
+            return;
+        }
+        this.logger.log(`White-label habilitado. App=${defaults.appName ?? "n/a"} Domain=${defaults.domain ?? "n/a"}`);
+    }
+    logStorageConfig() {
+        const storage = this.storageService.getConfig();
+        if (storage.type === "minio") {
+            this.logger.log(`Storage minio configurado. Endpoint=${storage.minio.endpoint ?? "n/a"} Bucket=${storage.minio.bucket ?? "n/a"}`);
+            return;
+        }
+        if (storage.type === "local") {
+            this.logger.log(`Storage local configurado. Path=${storage.localPath ?? "n/a"}`);
+        }
+    }
+    async bootstrapMasterAdmin() {
+        const enabled = (this.configService.get("TENANT_MASTER_ADMIN_ENABLED") ?? "false").toLowerCase() ===
+            "true";
+        if (!enabled) {
+            return;
+        }
+        const defaults = this.getTenantDefaults();
+        const name = this.configService.get("TENANT_MASTER_ADMIN_NAME") ?? "Admin";
+        const username = this.configService.get("TENANT_MASTER_ADMIN_USERNAME") ?? "";
+        const password = this.configService.get("TENANT_MASTER_ADMIN_PASSWORD") ?? "";
+        const email = this.configService.get("TENANT_MASTER_ADMIN_EMAIL") ?? "";
+        const tenantId = this.parseUuid(this.configService.get("TENANT_MASTER_ADMIN_TENANT_ID")) ??
+            defaults.tenantId;
+        const organizationId = this.parseUuid(this.configService.get("TENANT_MASTER_ADMIN_ORGANIZATION_ID")) ??
+            defaults.organizationId;
+        const workspaceId = this.parseUuid(this.configService.get("TENANT_MASTER_ADMIN_WORKSPACE_ID")) ??
+            defaults.workspaceId;
+        const roleIds = this.parseRoleIds(this.configService.get("TENANT_MASTER_ADMIN_ROLE") ?? "[]");
+        if (!password || !email) {
+            this.logger.warn("Bootstrap admin ignorado: email/senha nao definidos.");
+            return;
+        }
+        let transactionOpen = false;
+        try {
+            await this.pool.query("BEGIN");
+            transactionOpen = true;
+            await this.ensureTenant(tenantId, defaults.tenantName, defaults.tenantSlug);
+            await this.ensureOrganization(organizationId, tenantId, defaults.organizationName);
+            await this.ensureWorkspace(workspaceId, tenantId, organizationId, defaults.workspaceName);
+            const userExists = await this.pool.query("SELECT id FROM res_users WHERE tenant_id = $1 AND email = $2", [tenantId, email]);
+            if ((userExists.rowCount ?? 0) > 0) {
+                await this.pool.query("COMMIT");
+                this.logger.log("Bootstrap admin: usuario ja existe, ignorado.");
+                return;
+            }
+            const partnerId = await this.ensurePartner(name || username || email, email, tenantId, organizationId);
+            const hashedPassword = await bcrypt_1.default.hash(password, 12);
+            const userId = (0, crypto_1.randomUUID)();
+            await this.pool.query(`INSERT INTO res_users
+         (id, tenant_id, partner_id, email, password_hash, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, TRUE, now(), now())`, [userId, tenantId, partnerId, email, hashedPassword]);
+            await this.applyRoles(userId, tenantId, roleIds);
+            await this.pool.query("COMMIT");
+            transactionOpen = false;
+            this.logger.log("Bootstrap admin criado com sucesso.");
+        }
+        catch (error) {
+            if (transactionOpen) {
+                await this.pool.query("ROLLBACK");
+            }
+            this.logger.warn(`Bootstrap admin falhou: ${error.message}`);
+            throw error;
+        }
+    }
+    async bootstrapDefaultPlan() {
+        const enabled = (this.configService.get("DEFAULT_PLAN_BOOTSTRAP_ENABLED") ?? "false").toLowerCase() ===
+            "true";
+        if (!enabled) {
+            return;
+        }
+        const code = this.configService.get("DEFAULT_PLAN_CODE") ?? "";
+        const name = this.configService.get("DEFAULT_PLAN_NAME") ?? "";
+        if (!code || !name) {
+            this.logger.warn("DEFAULT_PLAN_* nao definido; bootstrap de plano ignorado.");
+            return;
+        }
+        try {
+            const existing = await this.pool.query("SELECT id FROM platform_plans WHERE code = $1", [
+                code
+            ]);
+            if ((existing.rowCount ?? 0) > 0) {
+                return;
+            }
+            const description = this.buildPlanDescription();
+            await this.pool.query(`INSERT INTO platform_plans (id, code, name, description, created_at)
+         VALUES ($1, $2, $3, $4, now())`, [(0, crypto_1.randomUUID)(), code, name, description]);
+            this.logger.log(`Plano default criado: ${code}`);
+        }
+        catch (error) {
+            this.logger.warn(`Bootstrap de plano falhou: ${error.message}`);
+            throw error;
+        }
+    }
+    buildPlanDescription() {
+        const payload = {
+            items_per_day: this.configService.get("DEFAULT_PLAN_ITEMS_PER_DAY") || null,
+            sensors_per_day: this.configService.get("DEFAULT_PLAN_SENSORS_PER_DAY") || null,
+            bytes_per_day: this.configService.get("DEFAULT_PLAN_BYTES_PER_DAY") || null,
+            alert_delay_seconds: this.configService.get("DEFAULT_PLAN_ALERT_DELAY_SECONDS") || null,
+            quota_enabled: this.configService.get("QUOTA_ENABLED") === "true",
+            quota_enforce: this.configService.get("QUOTA_ENFORCE") === "true",
+            quota_estimate_bytes: this.configService.get("QUOTA_ESTIMATE_BYTES") === "true",
+            billing_events_enabled: this.configService.get("BILLING_EVENTS_ENABLED") === "true"
+        };
+        return JSON.stringify(payload);
+    }
+    parseUuid(value) {
+        if (!value) {
+            return null;
+        }
+        const trimmed = value.trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        return uuidRegex.test(trimmed) ? trimmed : null;
+    }
+    parseRoleIds(raw) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+            return parsed.filter((item) => typeof item === "string" && this.parseUuid(item));
+        }
+        catch {
+            return [];
+        }
+    }
+    async ensureTenant(tenantId, name, slug) {
+        const exists = await this.pool.query("SELECT id FROM tenants WHERE id = $1", [tenantId]);
+        if ((exists.rowCount ?? 0) > 0) {
+            return;
+        }
+        await this.pool.query(`INSERT INTO tenants
+       (id, name, slug, db_strategy, migration_status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), now())`, [tenantId, name, slug, "shared", "idle"]);
+    }
+    async ensureOrganization(organizationId, tenantId, name) {
+        const exists = await this.pool.query("SELECT id FROM res_organizations WHERE id = $1", [
+            organizationId
+        ]);
+        if ((exists.rowCount ?? 0) > 0) {
+            return;
+        }
+        await this.pool.query(`INSERT INTO res_organizations
+       (id, tenant_id, name, is_default, created_at, updated_at)
+       VALUES ($1, $2, $3, TRUE, now(), now())`, [organizationId, tenantId, name]);
+    }
+    async ensureWorkspace(workspaceId, tenantId, organizationId, name) {
+        const exists = await this.pool.query("SELECT id FROM res_workspaces WHERE id = $1", [
+            workspaceId
+        ]);
+        if ((exists.rowCount ?? 0) > 0) {
+            return;
+        }
+        await this.pool.query(`INSERT INTO res_workspaces
+       (id, tenant_id, organization_id, name, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, now(), now())`, [workspaceId, tenantId, organizationId, name]);
+    }
+    async ensurePartner(name, email, tenantId, organizationId) {
+        const existing = await this.pool.query("SELECT id FROM res_partners WHERE tenant_id = $1 AND email = $2", [tenantId, email]);
+        if ((existing.rowCount ?? 0) > 0) {
+            return existing.rows[0].id;
+        }
+        const id = (0, crypto_1.randomUUID)();
+        await this.pool.query(`INSERT INTO res_partners
+       (id, tenant_id, organization_id, name, email, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), now())`, [id, tenantId, organizationId, name, email]);
+        return id;
+    }
+    async applyRoles(userId, tenantId, roleIds) {
+        if (roleIds.length === 0) {
+            if (this.configService.get("TENANT_MASTER_ADMIN_ROLE")) {
+                this.logger.warn("TENANT_MASTER_ADMIN_ROLE invalido ou vazio; roles ignoradas.");
+            }
+            return;
+        }
+        for (const roleId of roleIds) {
+            await this.pool.query(`INSERT INTO res_user_roles
+         (id, user_id, role_id, scope_type, scope_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, now())`, [(0, crypto_1.randomUUID)(), userId, roleId, "tenant", tenantId]);
+        }
+    }
+    getTenantDefaults() {
+        const rawTenantId = this.configService.get("TENANT_DEFAULT_ID");
+        const parsedTenantId = this.parseUuid(rawTenantId);
+        const tenantId = parsedTenantId ?? (0, crypto_1.randomUUID)();
+        if (!parsedTenantId && rawTenantId) {
+            this.logger.warn(`TENANT_DEFAULT_ID invalido (${rawTenantId}); usando ${tenantId}.`);
+        }
+        const rawOrganizationId = this.configService.get("TENANT_DEFAULT_ORGANIZATION_ID");
+        const parsedOrganizationId = this.parseUuid(rawOrganizationId);
+        const organizationId = parsedOrganizationId ?? (0, crypto_1.randomUUID)();
+        if (!parsedOrganizationId && rawOrganizationId) {
+            this.logger.warn(`TENANT_DEFAULT_ORGANIZATION_ID invalido (${rawOrganizationId}); usando ${organizationId}.`);
+        }
+        const rawWorkspaceId = this.configService.get("TENANT_DEFAULT_WORKSPACE_ID");
+        const parsedWorkspaceId = this.parseUuid(rawWorkspaceId);
+        const workspaceId = parsedWorkspaceId ?? (0, crypto_1.randomUUID)();
+        if (!parsedWorkspaceId && rawWorkspaceId) {
+            this.logger.warn(`TENANT_DEFAULT_WORKSPACE_ID invalido (${rawWorkspaceId}); usando ${workspaceId}.`);
+        }
+        return {
+            tenantId,
+            organizationId,
+            workspaceId,
+            tenantSlug: this.configService.get("TENANT_DEFAULT_SLUG") ?? "default-tenant",
+            tenantName: this.configService.get("TENANT_DEFAULT_NAME") ?? "Default Tenant",
+            organizationName: this.configService.get("TENANT_DEFAULT_ORGANIZATION_NAME") ??
+                "Default Organization",
+            workspaceName: this.configService.get("TENANT_DEFAULT_WORKSPACE_NAME") ??
+                "Default Workspace"
+        };
+    }
+};
+exports.BootstrapService = BootstrapService;
+exports.BootstrapService = BootstrapService = BootstrapService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __param(3, (0, common_1.Inject)(database_module_1.PG_POOL)),
+    __metadata("design:paramtypes", [config_1.ConfigService,
+        branding_service_1.BrandingService,
+        storage_service_1.StorageService,
+        pg_1.Pool])
+], BootstrapService);

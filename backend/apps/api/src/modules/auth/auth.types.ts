@@ -7,6 +7,8 @@ export interface PermissionOverride {
 
 export interface AuthUserPayload {
   sub: string;
+  jti?: string;
+  exp?: number;
   tenant_id?: string;
   organization_id?: string;
   workspace_id?: string | null;

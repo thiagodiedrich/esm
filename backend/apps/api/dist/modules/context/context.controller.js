@@ -80,7 +80,7 @@ __decorate([
 ], ContextController.prototype, "switchContext", null);
 exports.ContextController = ContextController = __decorate([
     (0, swagger_1.ApiTags)("Context"),
-    (0, common_1.Controller)("/api/context"),
+    (0, common_1.Controller)("/api/v1/context"),
     __metadata("design:paramtypes", [auth_service_1.AuthService,
         context_service_1.AuthContextService])
 ], ContextController);

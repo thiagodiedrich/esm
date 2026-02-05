@@ -29,6 +29,10 @@ import { BrandingController } from "./branding/branding.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { StorageController } from "./storage/storage.controller";
 import { TelemetryController } from "./telemetry/telemetry.controller";
+import { AdminController } from "./admin/admin.controller";
+import { AdminService } from "./admin/admin.service";
+import { TenantController } from "./tenant/tenant.controller";
+import { TenantService } from "./tenant/tenant.service";
 
 @Module({
   imports: [
@@ -50,7 +54,9 @@ import { TelemetryController } from "./telemetry/telemetry.controller";
     StorageController,
     TelemetryController,
     UsageController,
-    TenantMigrationController
+    TenantMigrationController,
+    AdminController,
+    TenantController
   ],
   providers: [
     {
@@ -69,7 +75,9 @@ import { TelemetryController } from "./telemetry/telemetry.controller";
     BrandingService,
     BootstrapService,
     StorageService,
-    AlertsService
+    AlertsService,
+    AdminService,
+    TenantService
   ]
 })
 export class AppModule implements NestModule {

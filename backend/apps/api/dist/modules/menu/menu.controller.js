@@ -47,6 +47,6 @@ __decorate([
 ], MenuController.prototype, "getMenu", null);
 exports.MenuController = MenuController = __decorate([
     (0, swagger_1.ApiTags)("Menu"),
-    (0, common_1.Controller)("/api/menu"),
+    (0, common_1.Controller)("/api/v1/menu"),
     __metadata("design:paramtypes", [menu_service_1.MenuService])
 ], MenuController);

@@ -1,2 +1,12 @@
+# Todas as migrations do sistema, na ordem de execução.
+# Caminhos relativos ao diretório backend. Linhas vazias e # são ignoradas pelo run.sh.
+#
+# REGRA: Ao criar uma nova migration, salvar o .sql na pasta do módulo e ADICIONAR
+# o caminho neste arquivo na ordem correta de execução.
+
+# control-plane
 migrations/control-plane/2026020301__phase1_erd.sql
 migrations/control-plane/2026020302__res_user_last_context.sql
+migrations/control-plane/2026020303__res_menus_and_permissions_seed.sql
+migrations/control-plane/2026020304__res_role_permissions.sql
+migrations/control-plane/2026020305__super_tenant_and_super_admin.sql

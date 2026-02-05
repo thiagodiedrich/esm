@@ -1,6 +1,6 @@
 BEGIN;
 
-CREATE TABLE res_user_last_context (
+CREATE TABLE IF NOT EXISTS res_user_last_context (
   id UUID PRIMARY KEY,
   user_id UUID REFERENCES res_users(id),
   organization_id UUID REFERENCES res_organizations(id),

@@ -34,37 +34,52 @@ def _build_connection_string() -> str:
 
 
 def _usage() -> None:
-    print("Uso: python run_migrations.py upgrade <modulo>")
-    print("Exemplo: python run_migrations.py upgrade res")
+    print("Uso: python run_migrations.py upgrade")
+    print("  Lê o arquivo backend/migrations/migrations e aplica cada SQL na ordem.")
+
+
+def _collect_migrations_from_file(root_dir: Path) -> list[Path]:
+    """Lê backend/migrations/migrations e retorna lista de paths (relativos ao root_dir) na ordem."""
+    migrations_file = root_dir / "migrations" / "migrations"
+    if not migrations_file.exists():
+        return []
+
+    paths: list[Path] = []
+    with migrations_file.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            paths.append(root_dir / line)
+    return paths
 
 
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] != "upgrade":
+    if len(sys.argv) < 2 or sys.argv[1] != "upgrade":
         _usage()
         return 1
 
-    module_name = sys.argv[2]
-    base_dir = Path(__file__).resolve().parent
-    module_dir = base_dir / module_name
+    root_dir = Path(__file__).resolve().parents[2]
+    sql_files = _collect_migrations_from_file(root_dir)
 
-    if not module_dir.exists() or not module_dir.is_dir():
-        print(f"Modulo de migrations nao encontrado: {module_dir}")
-        return 1
+    if not sql_files:
+        print("Nenhuma migration listada em migrations/migrations.")
+        return 0
+
+    for p in sql_files:
+        if not p.exists():
+            print(f"Migration nao encontrada: {p}", file=sys.stderr)
+            return 1
 
     _load_env()
     ensure_database()
 
     conn_str = _build_connection_string()
-    sql_files = sorted(module_dir.glob("*.sql"))
-
-    if not sql_files:
-        print("Nenhuma migration encontrada.")
-        return 0
 
     with psycopg2.connect(conn_str) as conn:
         conn.autocommit = True
         for sql_file in sql_files:
-            print(f"Aplicando {sql_file.name}")
+            print(f"Aplicando {sql_file.relative_to(root_dir)}")
             with sql_file.open("r", encoding="utf-8") as handle:
                 conn.cursor().execute(handle.read())
 

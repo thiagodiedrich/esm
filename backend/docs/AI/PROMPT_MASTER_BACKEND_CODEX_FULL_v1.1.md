@@ -131,7 +131,7 @@ Context:
 - Workspace required/optional based on res_organization_settings
 
 Context switch:
-- POST /api/context/switch
+- POST /api/v1/context/switch
 - Backend validates:
   - user access
   - scope
@@ -148,18 +148,18 @@ AUTHENTICATION (FROZEN)
 - Stored as httpOnly cookies
 
 Login:
-- POST /api/auth/login
+- POST /api/v1/auth/login
 - Credentials: email + password
 - Tenant resolved automatically
 - No tenant_id in payload
 
 Refresh:
-- POST /api/auth/refresh
+- POST /api/v1/auth/refresh
 - Uses refresh token
 - Issues new access token
 
 Logout:
-- POST /api/auth/logout
+- POST /api/v1/auth/logout
 - Invalidates session
 
 ================================================================================
@@ -202,7 +202,7 @@ MENU GENERATION (FROZEN)
 ================================================================================
 
 Endpoint:
-- GET /api/menu
+- GET /api/v1/menu
 
 Rules:
 - Menu is generated on backend

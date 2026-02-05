@@ -11,16 +11,24 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MenuService = void 0;
 const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
 const pg_1 = require("pg");
 const database_module_1 = require("../database/database.module");
 const menu_base_1 = require("./menu.base");
+const ioredis_1 = __importDefault(require("ioredis"));
 let MenuService = class MenuService {
-    constructor(pool) {
+    constructor(pool, configService) {
         this.pool = pool;
+        this.configService = configService;
         this.cache = new Map();
+        const redisUrl = this.configService.get("REDIS_URL");
+        this.redis = redisUrl ? new ioredis_1.default(redisUrl) : null;
     }
     async getMenu(user) {
         if (!user.tenant_id || !user.organization_id) {
@@ -28,9 +36,9 @@ let MenuService = class MenuService {
         }
         const cacheKey = `${user.tenant_id}:${user.organization_id}`;
         const now = Date.now();
-        const cached = this.cache.get(cacheKey);
-        if (cached && cached.expiresAt > now) {
-            return cached.items;
+        const cached = await this.getFromCache(cacheKey, now);
+        if (cached) {
+            return cached;
         }
         const [activeProducts, activeModules, ttlSeconds] = await Promise.all([
             this.getActiveProducts(user.tenant_id),
@@ -46,10 +54,31 @@ let MenuService = class MenuService {
             activeModules
         });
         const ttlMs = Math.max(0, (ttlSeconds ?? 0) * 1000);
-        if (ttlMs > 0) {
-            this.cache.set(cacheKey, { expiresAt: now + ttlMs, items: filtered });
-        }
+        await this.saveCache(cacheKey, filtered, ttlMs, now);
         return filtered;
+    }
+    async getFromCache(cacheKey, now) {
+        if (this.redis) {
+            const value = await this.redis.get(`menu:${cacheKey}`);
+            if (value) {
+                return JSON.parse(value);
+            }
+        }
+        const cached = this.cache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+            return cached.items;
+        }
+        return null;
+    }
+    async saveCache(cacheKey, items, ttlMs, now) {
+        if (ttlMs <= 0) {
+            return;
+        }
+        if (this.redis) {
+            await this.redis.set(`menu:${cacheKey}`, JSON.stringify(items), "PX", ttlMs);
+            return;
+        }
+        this.cache.set(cacheKey, { expiresAt: now + ttlMs, items });
     }
     filterMenu(items, context) {
         return items
@@ -122,5 +151,6 @@ exports.MenuService = MenuService;
 exports.MenuService = MenuService = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, common_1.Inject)(database_module_1.PG_POOL)),
-    __metadata("design:paramtypes", [pg_1.Pool])
+    __metadata("design:paramtypes", [pg_1.Pool,
+        config_1.ConfigService])
 ], MenuService);

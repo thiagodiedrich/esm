@@ -36,7 +36,7 @@ interface ContextSwitchRequest {
 }
 
 @ApiTags("Context")
-@Controller("/api/context")
+@Controller("/api/v1/context")
 export class ContextController {
   constructor(
     private readonly authService: AuthService,

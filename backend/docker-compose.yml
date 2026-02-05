@@ -129,7 +129,7 @@ services:
       - postgres
     command: >
       sh -c "pip install -r workers-python/migrations/requirements.txt
-      && python workers-python/migrations/run_migrations.py upgrade res"
+      && python workers-python/migrations/run_migrations.py upgrade"
 
 volumes:
   pg_data:

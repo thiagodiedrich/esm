@@ -1,6 +1,6 @@
 BEGIN;
 
-CREATE TABLE tenants (
+CREATE TABLE IF NOT EXISTS tenants (
   id UUID PRIMARY KEY,
   name VARCHAR,
   slug VARCHAR UNIQUE,
@@ -13,7 +13,7 @@ CREATE TABLE tenants (
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_partners (
+CREATE TABLE IF NOT EXISTS res_partners (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   organization_id UUID,
@@ -29,7 +29,7 @@ CREATE TABLE res_partners (
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_organizations (
+CREATE TABLE IF NOT EXISTS res_organizations (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   partner_id UUID,
@@ -39,17 +39,18 @@ CREATE TABLE res_organizations (
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-ALTER TABLE res_partners
-  ADD CONSTRAINT res_partners_organization_id_fkey
-  FOREIGN KEY (organization_id)
-  REFERENCES res_organizations(id);
+DO $$
+BEGIN
+  ALTER TABLE res_partners ADD CONSTRAINT res_partners_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES res_organizations(id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+  ALTER TABLE res_organizations ADD CONSTRAINT res_organizations_partner_id_fkey FOREIGN KEY (partner_id) REFERENCES res_partners(id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE res_organizations
-  ADD CONSTRAINT res_organizations_partner_id_fkey
-  FOREIGN KEY (partner_id)
-  REFERENCES res_partners(id);
-
-CREATE TABLE res_users (
+CREATE TABLE IF NOT EXISTS res_users (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   partner_id UUID REFERENCES res_partners(id),
@@ -61,7 +62,7 @@ CREATE TABLE res_users (
   UNIQUE (tenant_id, email)
 );
 
-CREATE TABLE res_workspaces (
+CREATE TABLE IF NOT EXISTS res_workspaces (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   organization_id UUID REFERENCES res_organizations(id),
@@ -70,7 +71,7 @@ CREATE TABLE res_workspaces (
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_roles (
+CREATE TABLE IF NOT EXISTS res_roles (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   name VARCHAR,
@@ -79,7 +80,7 @@ CREATE TABLE res_roles (
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_permissions (
+CREATE TABLE IF NOT EXISTS res_permissions (
   id UUID PRIMARY KEY,
   resource VARCHAR,
   action VARCHAR,
@@ -87,7 +88,7 @@ CREATE TABLE res_permissions (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_user_roles (
+CREATE TABLE IF NOT EXISTS res_user_roles (
   id UUID PRIMARY KEY,
   user_id UUID REFERENCES res_users(id),
   role_id UUID REFERENCES res_roles(id),
@@ -96,7 +97,7 @@ CREATE TABLE res_user_roles (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_user_permission_overrides (
+CREATE TABLE IF NOT EXISTS res_user_permission_overrides (
   id UUID PRIMARY KEY,
   user_id UUID REFERENCES res_users(id),
   permission_id UUID REFERENCES res_permissions(id),
@@ -104,7 +105,7 @@ CREATE TABLE res_user_permission_overrides (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE platform_products (
+CREATE TABLE IF NOT EXISTS platform_products (
   id UUID PRIMARY KEY,
   code VARCHAR UNIQUE,
   name VARCHAR,
@@ -112,7 +113,7 @@ CREATE TABLE platform_products (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE platform_product_modules (
+CREATE TABLE IF NOT EXISTS platform_product_modules (
   id UUID PRIMARY KEY,
   product_id UUID REFERENCES platform_products(id),
   code VARCHAR,
@@ -120,7 +121,7 @@ CREATE TABLE platform_product_modules (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE platform_plans (
+CREATE TABLE IF NOT EXISTS platform_plans (
   id UUID PRIMARY KEY,
   code VARCHAR UNIQUE,
   name VARCHAR,
@@ -128,7 +129,7 @@ CREATE TABLE platform_plans (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE tenant_platform_products (
+CREATE TABLE IF NOT EXISTS tenant_platform_products (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   product_id UUID REFERENCES platform_products(id),
@@ -137,7 +138,7 @@ CREATE TABLE tenant_platform_products (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE tenant_platform_product_modules (
+CREATE TABLE IF NOT EXISTS tenant_platform_product_modules (
   id UUID PRIMARY KEY,
   tenant_product_id UUID REFERENCES tenant_platform_products(id),
   product_module_id UUID REFERENCES platform_product_modules(id),
@@ -145,7 +146,7 @@ CREATE TABLE tenant_platform_product_modules (
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE res_organization_settings (
+CREATE TABLE IF NOT EXISTS res_organization_settings (
   id UUID PRIMARY KEY,
   organization_id UUID REFERENCES res_organizations(id),
   workspace_mode VARCHAR,
@@ -157,7 +158,7 @@ CREATE TABLE res_organization_settings (
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE TABLE tenant_usage_metrics (
+CREATE TABLE IF NOT EXISTS tenant_usage_metrics (
   id UUID PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id),
   metric_key VARCHAR,

@@ -3,9 +3,14 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import type { Algorithm } from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import { randomUUID } from "crypto";
 import { Pool } from "pg";
+import Redis from "ioredis";
 import { PG_POOL } from "../database/database.module";
 import { AuthUserPayload } from "./auth.types";
+
+const PREFIX_BLACKLIST_ACCESS = "auth:blacklist:access:";
+const PREFIX_BLACKLIST_REFRESH = "auth:blacklist:refresh:";
 
 interface IssuedTokens {
   access_token: string;
@@ -24,6 +29,9 @@ interface UserRecord {
   id: string;
   password_hash: string | null;
   is_active: boolean | null;
+  tenant_id?: string;
+  partner_id?: string | null;
+  email?: string | null;
 }
 
 @Injectable()
@@ -32,12 +40,16 @@ export class AuthService {
     string,
     { count: number; blockedUntil?: number }
   >();
+  private readonly redis: Redis | null;
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     @Inject(PG_POOL) private readonly pool: Pool
-  ) {}
+  ) {
+    const redisUrl = this.configService.get<string>("REDIS_URL");
+    this.redis = redisUrl?.trim() ? new Redis(redisUrl) : null;
+  }
 
   async verifyUserToken(token: string): Promise<AuthUserPayload> {
     return this.verifyToken(token);
@@ -51,13 +63,26 @@ export class AuthService {
     const algorithm =
       (this.configService.get<string>("JWT_ALGORITHM") || "RS256") as Algorithm;
 
+    let payload: AuthUserPayload;
     try {
-      return await this.jwtService.verifyAsync<AuthUserPayload>(token, {
+      payload = await this.jwtService.verifyAsync<AuthUserPayload>(token, {
         algorithms: [algorithm]
       });
     } catch (error) {
       throw new UnauthorizedException("Token invalido ou expirado.");
     }
+
+    if (payload.jti && this.redis) {
+      const prefix =
+        payload.type === "refresh" ? PREFIX_BLACKLIST_REFRESH : PREFIX_BLACKLIST_ACCESS;
+      const key = `${prefix}${payload.jti}`;
+      const revoked = await this.redis.get(key);
+      if (revoked) {
+        throw new UnauthorizedException("Token revogado.");
+      }
+    }
+
+    return payload;
   }
 
   async validateUserCredentials(tenantId: string, email: string, password: string) {
@@ -90,6 +115,24 @@ export class AuthService {
     return { id: user.id };
   }
 
+  async getUserById(tenantId: string, userId: string) {
+    const result = await this.pool.query<UserRecord>(
+      "SELECT id, tenant_id, partner_id, email, is_active FROM res_users WHERE tenant_id = $1 AND id = $2",
+      [tenantId, userId]
+    );
+    if (result.rowCount === 0) {
+      return null;
+    }
+    const user = result.rows[0];
+    return {
+      id: user.id,
+      tenant_id: user.tenant_id,
+      partner_id: user.partner_id ?? null,
+      email: user.email ?? "",
+      is_active: user.is_active ?? null
+    };
+  }
+
   async issueTokens(input: IssueTokensInput): Promise<IssuedTokens> {
     const accessMinutes = Number(
       this.configService.get<string>("ACCESS_TOKEN_EXPIRE_MINUTES") || 15
@@ -99,6 +142,7 @@ export class AuthService {
 
     const accessPayload: AuthUserPayload = {
       sub: input.userId,
+      jti: randomUUID(),
       tenant_id: input.tenantId,
       organization_id: input.organizationId,
       workspace_id: input.workspaceId,
@@ -107,6 +151,7 @@ export class AuthService {
 
     const refreshPayload: AuthUserPayload = {
       sub: input.userId,
+      jti: randomUUID(),
       tenant_id: input.tenantId,
       type: "refresh"
     };
@@ -121,6 +166,58 @@ export class AuthService {
       refresh_token: refreshToken,
       expires_in: accessTtlSeconds
     };
+  }
+
+  /**
+   * Invalida o access token, revoga o refresh token (se informado) e registra o logout.
+   * Requer Redis para blacklist; sem Redis apenas loga (tokens continuam válidos até expirar).
+   */
+  async logout(
+    accessToken: string,
+    refreshToken?: string | null
+  ): Promise<{ sub: string; tenant_id?: string } | null> {
+    let accessPayload: AuthUserPayload;
+    try {
+      accessPayload = await this.verifyUserToken(accessToken);
+    } catch {
+      return null;
+    }
+    if (accessPayload.type !== "access" || !accessPayload.jti) {
+      return null;
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const accessTtlMs = Math.max(0, ((accessPayload.exp ?? nowSec) - nowSec) * 1000);
+
+    if (this.redis) {
+      await this.redis.set(
+        `${PREFIX_BLACKLIST_ACCESS}${accessPayload.jti}`,
+        "1",
+        "PX",
+        accessTtlMs
+      );
+    }
+
+    if (refreshToken?.trim()) {
+      try {
+        const refreshPayload = await this.verifyUserToken(refreshToken);
+        if (refreshPayload.type === "refresh" && refreshPayload.jti) {
+          const refreshTtlMs = Math.max(0, ((refreshPayload.exp ?? nowSec) - nowSec) * 1000);
+          if (this.redis) {
+            await this.redis.set(
+              `${PREFIX_BLACKLIST_REFRESH}${refreshPayload.jti}`,
+              "1",
+              "PX",
+              refreshTtlMs
+            );
+          }
+        }
+      } catch {
+        // refresh inválido ou já expirado — ignorar
+      }
+    }
+
+    return { sub: accessPayload.sub, tenant_id: accessPayload.tenant_id };
   }
 
   private assertNotBlocked(key: string) {

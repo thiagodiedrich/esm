@@ -27,6 +27,7 @@ let AuthService = class AuthService {
         this.jwtService = jwtService;
         this.configService = configService;
         this.pool = pool;
+        this.loginAttempts = new Map();
     }
     async verifyUserToken(token) {
         return this.verifyToken(token);
@@ -46,19 +47,43 @@ let AuthService = class AuthService {
         }
     }
     async validateUserCredentials(tenantId, email, password) {
+        const key = `${tenantId}:${email.toLowerCase()}`;
+        this.assertNotBlocked(key);
         const result = await this.pool.query("SELECT id, password_hash, is_active FROM res_users WHERE tenant_id = $1 AND email = $2", [tenantId, email]);
         if (result.rowCount === 0) {
+            this.registerFailedAttempt(key);
             return null;
         }
         const user = result.rows[0];
         if (!user.is_active || !user.password_hash) {
+            this.registerFailedAttempt(key);
             return null;
         }
         const isValid = await bcrypt_1.default.compare(password, user.password_hash);
-        return isValid ? { id: user.id } : null;
+        if (!isValid) {
+            this.registerFailedAttempt(key);
+            return null;
+        }
+        this.clearFailedAttempts(key);
+        return { id: user.id };
+    }
+    async getUserById(tenantId, userId) {
+        const result = await this.pool.query("SELECT id, tenant_id, partner_id, email, is_active FROM res_users WHERE tenant_id = $1 AND id = $2", [tenantId, userId]);
+        if (result.rowCount === 0) {
+            return null;
+        }
+        const user = result.rows[0];
+        return {
+            id: user.id,
+            tenant_id: user.tenant_id,
+            partner_id: user.partner_id ?? null,
+            email: user.email ?? "",
+            is_active: user.is_active ?? null
+        };
     }
     async issueTokens(input) {
-        const accessTtlSeconds = 15 * 60;
+        const accessMinutes = Number(this.configService.get("ACCESS_TOKEN_EXPIRE_MINUTES") || 15);
+        const accessTtlSeconds = Math.max(1, accessMinutes) * 60;
         const refreshTtlSeconds = 7 * 24 * 60 * 60;
         const accessPayload = {
             sub: input.userId,
@@ -81,6 +106,41 @@ let AuthService = class AuthService {
             refresh_token: refreshToken,
             expires_in: accessTtlSeconds
         };
+    }
+    assertNotBlocked(key) {
+        const config = this.getFailbanConfig();
+        if (!config) {
+            return;
+        }
+        const state = this.loginAttempts.get(key);
+        if (state?.blockedUntil && state.blockedUntil > Date.now()) {
+            throw new common_1.UnauthorizedException("Usuario bloqueado temporariamente.");
+        }
+    }
+    registerFailedAttempt(key) {
+        const config = this.getFailbanConfig();
+        if (!config) {
+            return;
+        }
+        const current = this.loginAttempts.get(key) ?? { count: 0 };
+        const nextCount = current.count + 1;
+        if (nextCount >= config.maxAttempts) {
+            const blockedUntil = Date.now() + config.blockMinutes * 60 * 1000;
+            this.loginAttempts.set(key, { count: 0, blockedUntil });
+            return;
+        }
+        this.loginAttempts.set(key, { count: nextCount });
+    }
+    clearFailedAttempts(key) {
+        this.loginAttempts.delete(key);
+    }
+    getFailbanConfig() {
+        const maxAttempts = Number(this.configService.get("LOGIN_MAX_ATTEMPTS") ?? 0);
+        const blockMinutes = Number(this.configService.get("LOGIN_BLOCK_MINUTES") ?? 0);
+        if (maxAttempts > 0 && blockMinutes > 0) {
+            return { maxAttempts, blockMinutes };
+        }
+        return null;
     }
 };
 exports.AuthService = AuthService;

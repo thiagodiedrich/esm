@@ -23,15 +23,28 @@ const menu_controller_1 = require("./menu/menu.controller");
 const menu_service_1 = require("./menu/menu.service");
 const observability_module_1 = require("./observability/observability.module");
 const correlation_middleware_1 = require("./observability/correlation.middleware");
+const audit_middleware_1 = require("./observability/audit.middleware");
 const db_router_module_1 = require("./db-router/db-router.module");
 const kafka_module_1 = require("./kafka/kafka.module");
 const usage_controller_1 = require("./usage/usage.controller");
 const usage_service_1 = require("./usage/usage.service");
 const tenant_migration_controller_1 = require("./tenants/tenant-migration.controller");
 const tenant_migration_service_1 = require("./tenants/tenant-migration.service");
+const branding_service_1 = require("./branding/branding.service");
+const bootstrap_service_1 = require("./bootstrap/bootstrap.service");
+const storage_service_1 = require("./storage/storage.service");
+const alerts_service_1 = require("./alerts/alerts.service");
+const branding_controller_1 = require("./branding/branding.controller");
+const tenancy_middleware_1 = require("./tenancy/tenancy.middleware");
+const storage_controller_1 = require("./storage/storage.controller");
+const telemetry_controller_1 = require("./telemetry/telemetry.controller");
+const admin_controller_1 = require("./admin/admin.controller");
+const admin_service_1 = require("./admin/admin.service");
+const tenant_controller_1 = require("./tenant/tenant.controller");
+const tenant_service_1 = require("./tenant/tenant.service");
 let AppModule = class AppModule {
     configure(consumer) {
-        consumer.apply(correlation_middleware_1.CorrelationMiddleware).forRoutes("*");
+        consumer.apply(correlation_middleware_1.CorrelationMiddleware, tenancy_middleware_1.TenancyMiddleware, audit_middleware_1.AuditMiddleware).forRoutes("*");
     }
 };
 exports.AppModule = AppModule;
@@ -52,8 +65,13 @@ exports.AppModule = AppModule = __decorate([
             auth_controller_1.AuthController,
             context_controller_1.ContextController,
             menu_controller_1.MenuController,
+            branding_controller_1.BrandingController,
+            storage_controller_1.StorageController,
+            telemetry_controller_1.TelemetryController,
             usage_controller_1.UsageController,
-            tenant_migration_controller_1.TenantMigrationController
+            tenant_migration_controller_1.TenantMigrationController,
+            admin_controller_1.AdminController,
+            tenant_controller_1.TenantController
         ],
         providers: [
             {
@@ -68,7 +86,13 @@ exports.AppModule = AppModule = __decorate([
             context_service_1.AuthContextService,
             menu_service_1.MenuService,
             usage_service_1.UsageService,
-            tenant_migration_service_1.TenantMigrationService
+            tenant_migration_service_1.TenantMigrationService,
+            branding_service_1.BrandingService,
+            bootstrap_service_1.BootstrapService,
+            storage_service_1.StorageService,
+            alerts_service_1.AlertsService,
+            admin_service_1.AdminService,
+            tenant_service_1.TenantService
         ]
     })
 ], AppModule);

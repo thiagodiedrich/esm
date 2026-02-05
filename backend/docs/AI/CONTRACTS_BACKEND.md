@@ -8,21 +8,21 @@ Frontend, workers e integrações **devem obedecer exatamente** a estes contrato
 
 ## 🔐 Autenticação
 
-### POST /api/auth/login
+### POST /api/v1/auth/login
 - Credenciais: email + password
 - Tenant resolvido por domínio/subdomínio
 - Retorna cookies httpOnly
 
 ---
 
-### POST /api/auth/refresh
+### POST /api/v1/auth/refresh
 - Usa refresh token (cookie)
 - Retorna novo access token
 - Falha → 401
 
 ---
 
-### POST /api/auth/logout
+### POST /api/v1/auth/logout
 - Invalida sessão
 - Limpa cookies
 
@@ -30,7 +30,7 @@ Frontend, workers e integrações **devem obedecer exatamente** a estes contrato
 
 ## 🧭 Contexto
 
-### POST /api/context/switch
+### POST /api/v1/context/switch
 
 Payload:
 ```json

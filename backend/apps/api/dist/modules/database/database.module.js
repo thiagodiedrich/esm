@@ -22,9 +22,17 @@ exports.DatabaseModule = DatabaseModule = __decorate([
                 provide: exports.PG_POOL,
                 inject: [config_1.ConfigService],
                 useFactory: (configService) => {
-                    const connectionString = configService.get("CONTROL_PLANE_DATABASE_URL");
+                    const direct = configService.get("CONTROL_PLANE_DATABASE_URL");
+                    const connectionString = direct ??
+                        buildConnectionString({
+                            host: configService.get("POSTGRES_HOST"),
+                            port: configService.get("POSTGRES_PORT"),
+                            user: configService.get("POSTGRES_USER"),
+                            password: configService.get("POSTGRES_PASSWORD"),
+                            database: configService.get("POSTGRES_DB")
+                        });
                     if (!connectionString) {
-                        throw new Error("CONTROL_PLANE_DATABASE_URL nao configurada.");
+                        throw new Error("CONTROL_PLANE_DATABASE_URL ou POSTGRES_* nao configurados.");
                     }
                     return new pg_1.Pool({ connectionString });
                 }
@@ -33,3 +41,14 @@ exports.DatabaseModule = DatabaseModule = __decorate([
         exports: [exports.PG_POOL]
     })
 ], DatabaseModule);
+function buildConnectionString(params) {
+    const host = params.host ?? "";
+    const user = params.user ?? "";
+    const password = params.password ?? "";
+    const database = params.database ?? "";
+    if (!host || !user || !database) {
+        return null;
+    }
+    const port = params.port ?? "5432";
+    return `postgres://${user}:${password}@${host}:${port}/${database}`;
+}

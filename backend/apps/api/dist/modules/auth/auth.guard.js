@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppAuthGuard = void 0;
+/// <reference path="../../types/fastify.d.ts" />
 const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const auth_constants_1 = require("./auth.constants");

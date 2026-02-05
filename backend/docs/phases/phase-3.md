@@ -15,6 +15,6 @@ Fornecer suporte backend para o fluxo de UI.
 ## Implementacao
 - Login com email/senha (bcrypt cost 12) e tenant por `Host` ou `X-Tenant-Slug`.
 - Access token 15 min e refresh token 7 dias (JWT RS256).
-- Context switch em `POST /api/context/switch` com reemissao de tokens.
+- Context switch em `POST /api/v1/context/switch` com reemissao de tokens.
 - Regra de `workspace_mode` aplicada no login e no switch.
 - Persistencia opcional de contexto em `res_user_last_context`.

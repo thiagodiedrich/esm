@@ -8,14 +8,18 @@ import {
 import { Reflector } from "@nestjs/core";
 import { FastifyRequest } from "fastify";
 import { AuthUser } from "../auth/auth.types";
+import { SuperUserService } from "../auth/super-user.service";
 import { PERMISSION_METADATA_KEY } from "./rbac.constants";
 import { PermissionRequirement } from "./rbac.decorators";
 
 @Injectable()
 export class RbacGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly superUserService: SuperUserService
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const requirement = this.reflector.getAllAndOverride<PermissionRequirement>(
       PERMISSION_METADATA_KEY,
       [context.getHandler(), context.getClass()]
@@ -30,6 +34,10 @@ export class RbacGuard implements CanActivate {
 
     if (!user) {
       throw new UnauthorizedException("Usuario nao autenticado.");
+    }
+
+    if (await this.superUserService.hasFullAccess(user)) {
+      return true;
     }
 
     const permissionKey = `${requirement.resource}:${requirement.action}`;

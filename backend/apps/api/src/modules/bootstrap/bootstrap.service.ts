@@ -130,13 +130,26 @@ export class BootstrapService implements OnApplicationBootstrap {
         defaults.workspaceName
       );
 
-      const userExists = await this.pool.query(
-        "SELECT id FROM res_users WHERE tenant_id = $1 AND email = $2",
+      await this.pool.query(
+        "UPDATE tenants SET is_super_tenant = true, updated_at = now() WHERE id = $1",
+        [tenantId]
+      );
+
+      const userExists = await this.pool.query<{ id: string }>(
+        "SELECT id FROM res_users WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)",
         [tenantId, email]
       );
       if ((userExists.rowCount ?? 0) > 0) {
+        const userId = userExists.rows[0].id;
+        await this.pool.query(
+          `UPDATE res_users
+           SET is_super_tenant = true, is_super_admin = true, organization_id = $2, updated_at = now()
+           WHERE id = $1`,
+          [userId, organizationId]
+        );
+        await this.applyRoles(userId, tenantId, roleIds);
         await this.pool.query("COMMIT");
-        this.logger.log("Bootstrap admin: usuario ja existe, ignorado.");
+        this.logger.log("Bootstrap admin: usuario ja existe, flags is_super_tenant/is_super_admin atualizados.");
         return;
       }
 
@@ -146,9 +159,9 @@ export class BootstrapService implements OnApplicationBootstrap {
       const userId = randomUUID();
       await this.pool.query(
         `INSERT INTO res_users
-         (id, tenant_id, partner_id, email, password_hash, is_active, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, TRUE, now(), now())`,
-        [userId, tenantId, partnerId, email, hashedPassword]
+         (id, tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, TRUE, $6, now(), now())`,
+        [userId, tenantId, partnerId, email, hashedPassword, organizationId]
       );
 
       await this.applyRoles(userId, tenantId, roleIds);
@@ -262,9 +275,20 @@ export class BootstrapService implements OnApplicationBootstrap {
 
     await this.pool.query(
       `INSERT INTO res_organizations
-       (id, tenant_id, name, is_default, created_at, updated_at)
-       VALUES ($1, $2, $3, TRUE, now(), now())`,
+       (id, tenant_id, partner_id, name, is_default, created_at, updated_at)
+       VALUES ($1, $2, NULL, $3, TRUE, now(), now())`,
       [organizationId, tenantId, name]
+    );
+  }
+
+  private async ensureOrganizationPartner(
+    organizationId: string,
+    tenantId: string,
+    partnerId: string
+  ) {
+    await this.pool.query(
+      "UPDATE res_organizations SET partner_id = $2, updated_at = now() WHERE id = $1 AND tenant_id = $3",
+      [organizationId, partnerId, tenantId]
     );
   }
 

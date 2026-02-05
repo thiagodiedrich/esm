@@ -4,6 +4,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { readFileSync } from "fs";
 import type { Algorithm } from "jsonwebtoken";
 import { AuthService } from "./auth.service";
+import { SuperUserService } from "./super-user.service";
 import { DatabaseModule } from "../database/database.module";
 
 @Module({
@@ -47,7 +48,7 @@ import { DatabaseModule } from "../database/database.module";
       }
     })
   ],
-  providers: [AuthService],
-  exports: [AuthService]
+  providers: [AuthService, SuperUserService],
+  exports: [AuthService, SuperUserService]
 })
 export class AuthModule {}

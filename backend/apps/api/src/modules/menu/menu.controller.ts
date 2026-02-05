@@ -16,7 +16,7 @@ class MenuResponseDto {
 }
 
 @ApiTags("Menu")
-@Controller("/api/menu")
+@Controller("/api/v1/menu")
 export class MenuController {
   constructor(private readonly menuService: MenuService) {}
 
