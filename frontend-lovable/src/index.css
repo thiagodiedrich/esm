@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 
+ * SaaS ERP Design System — FROZEN
+ * Professional enterprise look with clear hierarchy
+ * All colors MUST be HSL.
+ */
+
+@layer base {
+  :root {
+    /* Core backgrounds */
+    --background: 220 20% 97%;
+    --foreground: 222 47% 11%;
+
+    /* Cards & surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    /* Popovers & dropdowns */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary — Deep navy blue (professional ERP) */
+    --primary: 222 47% 20%;
+    --primary-foreground: 210 40% 98%;
+
+    /* Secondary — Subtle gray-blue */
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 11%;
+
+    /* Muted — For disabled/secondary text */
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    /* Accent — Teal for interactive states */
+    --accent: 173 58% 39%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive — Error states */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Warning — Caution states */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Success — Positive states */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Info — Informational states */
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+
+    /* Borders & inputs */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 47% 20%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar — Dark professional sidebar */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-primary: 173 58% 39%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 47% 18%;
+    --sidebar-accent-foreground: 210 40% 96%;
+    --sidebar-border: 222 47% 18%;
+    --sidebar-ring: 173 58% 39%;
+    --sidebar-muted: 220 9% 46%;
+
+    /* ERP-specific tokens */
+    --header-height: 3.5rem;
+    --context-bar-height: 2.5rem;
+  }
+
+  .dark {
+    /* Core backgrounds */
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    /* Cards & surfaces */
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+
+    /* Popovers & dropdowns */
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary */
+    --primary: 210 40% 98%;
+    --primary-foreground: 222 47% 11%;
+
+    /* Secondary */
+    --secondary: 222 47% 15%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* Muted */
+    --muted: 222 47% 15%;
+    --muted-foreground: 215 20% 65%;
+
+    /* Accent */
+    --accent: 173 58% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive */
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Warning */
+    --warning: 38 92% 45%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Success */
+    --success: 142 71% 40%;
+    --success-foreground: 0 0% 100%;
+
+    /* Info */
+    --info: 199 89% 42%;
+    --info-foreground: 0 0% 100%;
+
+    /* Borders & inputs */
+    --border: 222 47% 18%;
+    --input: 222 47% 18%;
+    --ring: 212 27% 84%;
+
+    /* Sidebar */
+    --sidebar-background: 222 47% 4%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-primary: 173 58% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 47% 12%;
+    --sidebar-accent-foreground: 210 40% 96%;
+    --sidebar-border: 222 47% 12%;
+    --sidebar-ring: 173 58% 45%;
+    --sidebar-muted: 215 20% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* System messages per ERROR_HANDLING.md */
+@layer components {
+  .system-message {
+    @apply rounded-lg p-4 text-sm;
+  }
+
+  .system-message--error {
+    @apply bg-destructive/10 text-destructive border border-destructive/20;
+  }
+
+  .system-message--warning {
+    @apply bg-warning/10 text-warning border border-warning/20;
+  }
+
+  .system-message--success {
+    @apply bg-success/10 text-success border border-success/20;
+  }
+
+  .system-message--info {
+    @apply bg-info/10 text-info border border-info/20;
+  }
+}
