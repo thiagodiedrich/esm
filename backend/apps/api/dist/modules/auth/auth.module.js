@@ -12,6 +12,7 @@ const config_1 = require("@nestjs/config");
 const jwt_1 = require("@nestjs/jwt");
 const fs_1 = require("fs");
 const auth_service_1 = require("./auth.service");
+const super_user_service_1 = require("./super-user.service");
 const database_module_1 = require("../database/database.module");
 let AuthModule = class AuthModule {
 };
@@ -52,7 +53,7 @@ exports.AuthModule = AuthModule = __decorate([
                 }
             })
         ],
-        providers: [auth_service_1.AuthService],
-        exports: [auth_service_1.AuthService]
+        providers: [auth_service_1.AuthService, super_user_service_1.SuperUserService],
+        exports: [auth_service_1.AuthService, super_user_service_1.SuperUserService]
     })
 ], AuthModule);

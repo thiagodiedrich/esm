@@ -53,21 +53,69 @@ class LogoutRequestDto {
   refresh_token?: string;
 }
 
-class MeResponseDto {
+class MeWorkspaceDto {
   @ApiProperty()
   id!: string;
+  @ApiProperty()
+  name!: string;
+  @ApiProperty()
+  is_active!: boolean;
+}
+
+class MeOrganizationDto {
+  @ApiProperty()
+  id!: string;
+  @ApiProperty()
+  name!: string;
+  @ApiProperty()
+  is_default!: boolean;
+  @ApiProperty({ type: [MeWorkspaceDto] })
+  workspaces!: MeWorkspaceDto[];
+}
+
+class MeCurrentContextDto {
+  @ApiProperty()
+  organization_id!: string;
+  @ApiProperty()
+  organization_name!: string;
+  @ApiProperty({ nullable: true })
+  workspace_id!: string | null;
+  @ApiProperty({ nullable: true })
+  workspace_name!: string | null;
+  @ApiProperty({ enum: ["required", "optional"] })
+  workspace_mode!: "required" | "optional";
+}
+
+class MeResponseDto {
+  @ApiProperty({ description: "ID do usuário (res_users.id)" })
+  user_id!: string;
+
+  @ApiProperty()
+  email!: string;
+
+  @ApiProperty()
+  name!: string;
 
   @ApiProperty()
   tenant_id!: string;
 
   @ApiProperty()
-  email!: string;
+  tenant_slug!: string;
 
   @ApiProperty({ required: false, nullable: true })
   partner_id?: string | null;
 
   @ApiProperty({ required: false, nullable: true })
   is_active?: boolean | null;
+
+  @ApiProperty({ type: [MeOrganizationDto] })
+  organizations!: MeOrganizationDto[];
+
+  @ApiProperty({ type: MeCurrentContextDto, nullable: true })
+  current_context!: MeCurrentContextDto | null;
+
+  @ApiProperty()
+  requires_context_selection!: boolean;
 }
 
 interface LoginRequest {
@@ -109,11 +157,21 @@ export class AuthController {
       throw new UnauthorizedException("Contexto invalido para login.");
     }
 
+    const displayNames = await this.authService.getLoginDisplayNames(
+      tenant.id,
+      user.id,
+      context.organizationId,
+      context.workspaceId
+    );
     const tokens = await this.authService.issueTokens({
       userId: user.id,
       tenantId: tenant.id,
       organizationId: context.organizationId,
-      workspaceId: context.workspaceId
+      workspaceId: context.workspaceId,
+      tenantSlug: displayNames.tenantSlug,
+      name: displayNames.name,
+      organizationName: displayNames.organizationName,
+      workspaceName: displayNames.workspaceName
     });
 
     return tokens;
@@ -140,15 +198,25 @@ export class AuthController {
     }
 
     const context = await this.contextService.resolveLoginContext(payload.tenant_id, payload.sub);
-    if (!context?.organizationId || !context?.workspaceId) {
+    if (!context?.organizationId) {
       throw new UnauthorizedException("Contexto invalido para login.");
     }
 
+    const displayNames = await this.authService.getLoginDisplayNames(
+      payload.tenant_id,
+      payload.sub,
+      context.organizationId,
+      context.workspaceId ?? null
+    );
     return this.authService.issueTokens({
       userId: payload.sub,
       tenantId: payload.tenant_id,
       organizationId: context.organizationId,
-      workspaceId: context.workspaceId
+      workspaceId: context.workspaceId ?? null,
+      tenantSlug: displayNames.tenantSlug,
+      name: displayNames.name,
+      organizationName: displayNames.organizationName,
+      workspaceName: displayNames.workspaceName
     });
   }
 
@@ -162,26 +230,31 @@ export class AuthController {
   async logout(
     @Req() request: FastifyRequest,
     @Body() body?: { refresh_token?: string }
-  ) {
+  ): Promise<void> {
     const authHeader = request.headers.authorization;
     const token = authHeader?.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length).trim()
       : "";
-    if (token) {
-      const payload = await this.authService.logout(token, body?.refresh_token);
-      if (payload) {
-        this.logger.log({
-          message: "Logout",
-          event: "auth.logout",
-          user_id: payload.sub,
-          tenant_id: payload.tenant_id
-        });
+    try {
+      if (token) {
+        const payload = await this.authService.logout(token, body?.refresh_token);
+        if (payload) {
+          this.logger.log({
+            message: "Logout",
+            event: "auth.logout",
+            user_id: payload.sub,
+            tenant_id: payload.tenant_id
+          });
+        }
       }
+    } catch {
+      // Token inválido/expirado ou Redis indisponível: não relançar; frontend deve sempre receber 204.
     }
+    // Sempre 204 para o cliente poder limpar estado e redirecionar para login.
   }
 
   @Get("/me")
-  @ApiOperation({ summary: "Dados do usuario logado" })
+  @ApiOperation({ summary: "Dados do usuario logado (sessão completa para o frontend)" })
   @ApiBearerAuth("userAuth")
   @ApiOkResponse({ type: MeResponseDto })
   async me(@Req() request: FastifyRequest) {
@@ -190,11 +263,18 @@ export class AuthController {
       throw new UnauthorizedException("Access token necessario.");
     }
 
-    const record = await this.authService.getUserById(user.tenant_id ?? "", user.sub);
-    if (!record) {
+    const payload = await this.authService.getMePayload(
+      user.tenant_id ?? "",
+      user.sub,
+      {
+        organizationId: user.organization_id,
+        workspaceId: user.workspace_id ?? null
+      }
+    );
+    if (!payload) {
       throw new UnauthorizedException("Usuario nao encontrado.");
     }
 
-    return record;
+    return payload;
   }
 }

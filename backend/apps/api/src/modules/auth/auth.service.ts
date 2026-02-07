@@ -23,6 +23,10 @@ interface IssueTokensInput {
   tenantId: string;
   organizationId: string;
   workspaceId: string | null;
+  tenantSlug?: string;
+  name?: string;
+  organizationName?: string;
+  workspaceName?: string | null;
 }
 
 interface UserRecord {
@@ -31,7 +35,36 @@ interface UserRecord {
   is_active: boolean | null;
   tenant_id?: string;
   partner_id?: string | null;
+  organization_id?: string | null;
   email?: string | null;
+}
+
+export interface MeOrganization {
+  id: string;
+  name: string;
+  is_default: boolean;
+  workspaces: Array<{ id: string; name: string; is_active: boolean }>;
+}
+
+export interface MeCurrentContext {
+  organization_id: string;
+  organization_name: string;
+  workspace_id: string | null;
+  workspace_name: string | null;
+  workspace_mode: "required" | "optional";
+}
+
+export interface GetMePayloadResult {
+  user_id: string;
+  email: string;
+  name: string;
+  tenant_id: string;
+  tenant_slug: string;
+  partner_id: string | null;
+  is_active: boolean | null;
+  organizations: MeOrganization[];
+  current_context: MeCurrentContext | null;
+  requires_context_selection: boolean;
 }
 
 @Injectable()
@@ -115,6 +148,55 @@ export class AuthService {
     return { id: user.id };
   }
 
+  /**
+   * Nomes para preencher o JWT (tenant_slug, name, organization_name, workspace_name).
+   * Usado em login e refresh para o frontend exibir header/contexto sem depender de GET /me.
+   */
+  async getLoginDisplayNames(
+    tenantId: string,
+    userId: string,
+    organizationId: string,
+    workspaceId: string | null
+  ): Promise<{ tenantSlug: string; name: string; organizationName: string; workspaceName: string | null }> {
+    const slugResult = await this.pool.query<{ slug: string }>(
+      "SELECT slug FROM tenants WHERE id = $1",
+      [tenantId]
+    );
+    const tenantSlug = slugResult.rows[0]?.slug ?? "";
+    const userResult = await this.pool.query<{ partner_id: string | null; email: string | null }>(
+      "SELECT partner_id, email FROM res_users WHERE tenant_id = $1 AND id = $2",
+      [tenantId, userId]
+    );
+    let name = "Usuário";
+    if (userResult.rowCount) {
+      const pid = userResult.rows[0].partner_id;
+      const email = userResult.rows[0].email ?? "";
+      if (pid) {
+        const pResult = await this.pool.query<{ name: string | null }>(
+          "SELECT name FROM res_partners WHERE id = $1",
+          [pid]
+        );
+        name = (pResult.rows[0]?.name ?? email).trim() || email || "Usuário";
+      } else {
+        name = email.trim() || "Usuário";
+      }
+    }
+    const orgResult = await this.pool.query<{ name: string | null }>(
+      "SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2",
+      [organizationId, tenantId]
+    );
+    const organizationName = orgResult.rows[0]?.name ?? "";
+    let workspaceName: string | null = null;
+    if (workspaceId) {
+      const wsResult = await this.pool.query<{ name: string | null }>(
+        "SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2",
+        [workspaceId, organizationId]
+      );
+      workspaceName = wsResult.rows[0]?.name ?? null;
+    }
+    return { tenantSlug, name, organizationName, workspaceName };
+  }
+
   async getUserById(tenantId: string, userId: string) {
     const result = await this.pool.query<UserRecord>(
       "SELECT id, tenant_id, partner_id, email, is_active FROM res_users WHERE tenant_id = $1 AND id = $2",
@@ -133,6 +215,122 @@ export class AuthService {
     };
   }
 
+  /**
+   * Payload completo para GET /me: user_id, name, tenant_slug, organizations (com workspaces),
+   * current_context (com nomes e workspace_mode), requires_context_selection.
+   */
+  async getMePayload(
+    tenantId: string,
+    userId: string,
+    context: { organizationId?: string; workspaceId?: string | null }
+  ): Promise<GetMePayloadResult | null> {
+    const userResult = await this.pool.query<{
+      id: string;
+      tenant_id: string;
+      partner_id: string | null;
+      email: string | null;
+      is_active: boolean | null;
+      tenant_slug: string;
+      partner_name: string | null;
+    }>(
+      `SELECT u.id, u.tenant_id, u.partner_id, u.email, u.is_active, t.slug AS tenant_slug, p.name AS partner_name
+       FROM res_users u
+       JOIN tenants t ON t.id = u.tenant_id
+       LEFT JOIN res_partners p ON p.id = u.partner_id
+       WHERE u.tenant_id = $1 AND u.id = $2`,
+      [tenantId, userId]
+    );
+    if (userResult.rowCount === 0) {
+      return null;
+    }
+    const row = userResult.rows[0];
+    const name = (row.partner_name ?? row.email ?? "Usuário").trim() || "Usuário";
+
+    const orgsResult = await this.pool.query<{
+      id: string;
+      name: string | null;
+      is_default: boolean | null;
+    }>(
+      "SELECT id, name, is_default FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at",
+      [tenantId]
+    );
+    const orgIds = orgsResult.rows.map((o) => o.id);
+    let workspacesByOrg: Map<string, Array<{ id: string; name: string; is_active: boolean }>> =
+      new Map();
+    if (orgIds.length > 0) {
+      const wsResult = await this.pool.query<{
+        id: string;
+        organization_id: string;
+        name: string | null;
+      }>(
+        "SELECT id, organization_id, name FROM res_workspaces WHERE organization_id = ANY($1::uuid[])",
+        [orgIds]
+      );
+      for (const ws of wsResult.rows) {
+        const list = workspacesByOrg.get(ws.organization_id) ?? [];
+        list.push({
+          id: ws.id,
+          name: ws.name ?? "",
+          is_active: true
+        });
+        workspacesByOrg.set(ws.organization_id, list);
+      }
+    }
+    const organizations: MeOrganization[] = orgsResult.rows.map((o) => ({
+      id: o.id,
+      name: o.name ?? "",
+      is_default: o.is_default ?? false,
+      workspaces: workspacesByOrg.get(o.id) ?? []
+    }));
+
+    let current_context: MeCurrentContext | null = null;
+    const organizationId = context.organizationId;
+    const workspaceId = context.workspaceId ?? null;
+
+    if (organizationId) {
+      const orgRow = await this.pool.query<{ name: string | null }>(
+        "SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2",
+        [organizationId, tenantId]
+      );
+      const organization_name = orgRow.rowCount ? (orgRow.rows[0].name ?? "") : "";
+      let workspace_name: string | null = null;
+      if (workspaceId) {
+        const wsRow = await this.pool.query<{ name: string | null }>(
+          "SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2",
+          [workspaceId, organizationId]
+        );
+        workspace_name = wsRow.rowCount ? (wsRow.rows[0].name ?? null) : null;
+      }
+      const settingsRow = await this.pool.query<{ workspace_mode: string | null }>(
+        "SELECT workspace_mode FROM res_organization_settings WHERE organization_id = $1",
+        [organizationId]
+      );
+      const workspace_mode =
+        settingsRow.rows[0]?.workspace_mode === "required" ? "required" : "optional";
+
+      current_context = {
+        organization_id: organizationId,
+        organization_name,
+        workspace_id: workspaceId,
+        workspace_name,
+        workspace_mode
+      };
+    }
+
+    return {
+      user_id: row.id,
+      email: row.email ?? "",
+      name,
+      tenant_id: row.tenant_id,
+      tenant_slug: row.tenant_slug ?? "",
+      partner_id: row.partner_id,
+      is_active: row.is_active,
+      organizations,
+      current_context,
+      requires_context_selection: !current_context
+    };
+  }
+
   async issueTokens(input: IssueTokensInput): Promise<IssuedTokens> {
     const accessMinutes = Number(
       this.configService.get<string>("ACCESS_TOKEN_EXPIRE_MINUTES") || 15
@@ -144,8 +342,12 @@ export class AuthService {
       sub: input.userId,
       jti: randomUUID(),
       tenant_id: input.tenantId,
+      tenant_slug: input.tenantSlug,
       organization_id: input.organizationId,
+      organization_name: input.organizationName,
       workspace_id: input.workspaceId,
+      workspace_name: input.workspaceName,
+      name: input.name,
       type: "access"
     };
 

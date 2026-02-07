@@ -42,6 +42,8 @@ Observação: `localhost`, IP e host sem ponto não são tratados como slug.
 | GET | `/api/v1/health` | Healthcheck simples |
 | GET | `/api/v1/health/detailed` | Healthcheck detalhado (Postgres, Kafka, MinIO, Redis) |
 
+O controller está registrado com `@Controller("/api/v1/health")`; não há prefixo global que duplique o path. O frontend deve usar `VITE_API_URL` terminando em `/api/v1` para que `GET {base}/health` seja `/api/v1/health`.
+
 Resposta simples: `{ "status": "ok" }`
 
 Resposta detalhada (exemplo):

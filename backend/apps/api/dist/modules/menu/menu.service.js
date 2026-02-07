@@ -20,19 +20,37 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const pg_1 = require("pg");
 const database_module_1 = require("../database/database.module");
-const menu_base_1 = require("./menu.base");
 const ioredis_1 = __importDefault(require("ioredis"));
+const super_user_service_1 = require("../auth/super-user.service");
+/** Primeira opção do menu, sempre exibida (hardcoded). */
+const DASHBOARD_ITEM = {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: "home",
+    route: "/dashboard",
+    resource: null,
+    action: null,
+    product_code: null,
+    product_module_code: null,
+    children: []
+};
 let MenuService = class MenuService {
-    constructor(pool, configService) {
+    constructor(pool, configService, superUserService) {
         this.pool = pool;
         this.configService = configService;
+        this.superUserService = superUserService;
         this.cache = new Map();
         const redisUrl = this.configService.get("REDIS_URL");
         this.redis = redisUrl ? new ioredis_1.default(redisUrl) : null;
     }
     async getMenu(user) {
         if (!user.tenant_id || !user.organization_id) {
-            return [];
+            return [DASHBOARD_ITEM];
+        }
+        if (await this.superUserService.hasFullAccess(user)) {
+            const dbMenus = await this.getMenusFromDb();
+            const tree = this.buildMenuTree(dbMenus);
+            return [DASHBOARD_ITEM, ...tree];
         }
         const cacheKey = `${user.tenant_id}:${user.organization_id}`;
         const now = Date.now();
@@ -40,22 +58,103 @@ let MenuService = class MenuService {
         if (cached) {
             return cached;
         }
-        const [activeProducts, activeModules, ttlSeconds] = await Promise.all([
+        const [dbMenus, userOverrides, rolePermissions, activeProducts, activeModules, ttlSeconds] = await Promise.all([
+            this.getMenusFromDb(),
+            this.getUserPermissionOverrides(user.sub),
+            this.getUserPermissionsFromRoles(user.sub),
             this.getActiveProducts(user.tenant_id),
             this.getActiveModules(user.tenant_id),
             this.getMenuCacheTtl(user.organization_id)
         ]);
         const permissions = new Set(user.permissions ?? []);
-        const overrides = new Map((user.permission_overrides ?? []).map((item) => [item.permission, item.effect]));
-        const filtered = this.filterMenu(menu_base_1.MENU_BASE, {
+        for (const key of rolePermissions) {
+            permissions.add(key);
+        }
+        const overrides = new Map((user.permission_overrides ?? []).map((item) => [
+            item.permission,
+            item.effect
+        ]));
+        for (const row of userOverrides) {
+            const key = `${row.resource}:${row.action}`;
+            if (row.effect === "allow") {
+                permissions.add(key);
+            }
+            overrides.set(key, row.effect);
+        }
+        const tree = this.buildMenuTree(dbMenus);
+        const filtered = this.filterMenu(tree, {
             permissions,
             overrides,
             activeProducts,
             activeModules
         });
+        const items = [DASHBOARD_ITEM, ...filtered];
         const ttlMs = Math.max(0, (ttlSeconds ?? 0) * 1000);
-        await this.saveCache(cacheKey, filtered, ttlMs, now);
-        return filtered;
+        await this.saveCache(cacheKey, items, ttlMs, now);
+        return items;
+    }
+    /** Carrega itens de menu da tabela res_menus (tenant e admin), ordenados por scope e sequence. */
+    async getMenusFromDb() {
+        const result = await this.pool.query(`SELECT id, parent_id, label, icon, route, resource, action,
+              product_code, product_module_code, sequence, scope
+       FROM res_menus
+       ORDER BY CASE scope WHEN 'tenant' THEN 0 ELSE 1 END, sequence ASC, label ASC`);
+        return result.rows;
+    }
+    /** Carrega overrides de permissão do usuário (allow/deny) para filtrar o menu. */
+    async getUserPermissionOverrides(userId) {
+        const result = await this.pool.query(`SELECT p.resource, p.action, o.effect
+       FROM res_user_permission_overrides o
+       JOIN res_permissions p ON p.id = o.permission_id
+       WHERE o.user_id = $1`, [userId]);
+        return result.rows;
+    }
+    /** Carrega permissões herdadas das roles do usuário (res_user_roles -> res_role_permissions -> res_permissions). */
+    async getUserPermissionsFromRoles(userId) {
+        const result = await this.pool.query(`SELECT DISTINCT p.resource, p.action
+       FROM res_user_roles ur
+       JOIN res_role_permissions rp ON rp.role_id = ur.role_id
+       JOIN res_permissions p ON p.id = rp.permission_id
+       WHERE ur.user_id = $1`, [userId]);
+        return result.rows.map((r) => `${r.resource}:${r.action}`);
+    }
+    /** Monta árvore de menu a partir da lista plana (parent_id). */
+    buildMenuTree(rows) {
+        const byId = new Map();
+        for (const r of rows) {
+            byId.set(r.id, {
+                id: r.id,
+                label: r.label,
+                icon: r.icon,
+                route: r.route,
+                resource: r.resource,
+                action: r.action,
+                product_code: r.product_code,
+                product_module_code: r.product_module_code,
+                children: []
+            });
+        }
+        const roots = [];
+        for (const r of rows) {
+            const item = byId.get(r.id);
+            if (!r.parent_id) {
+                roots.push(item);
+            }
+            else {
+                const parent = byId.get(r.parent_id);
+                if (parent) {
+                    parent.children.push(item);
+                }
+                else {
+                    roots.push(item);
+                }
+            }
+        }
+        for (const item of byId.values()) {
+            item.children.sort((a, b) => rows.findIndex((r) => r.id === a.id) -
+                rows.findIndex((r) => r.id === b.id));
+        }
+        return roots;
     }
     async getFromCache(cacheKey, now) {
         if (this.redis) {
@@ -92,7 +191,10 @@ let MenuService = class MenuService {
         }
         const children = this.filterMenu(item.children ?? [], context);
         const blocked = this.isBlocked(item, context.activeProducts, context.activeModules);
-        if (!item.resource && !item.action && children.length === 0 && item.children?.length) {
+        if (!item.resource &&
+            !item.action &&
+            children.length === 0 &&
+            item.children?.length) {
             return null;
         }
         return {
@@ -119,7 +221,8 @@ let MenuService = class MenuService {
         if (item.product_code && !activeProducts.has(item.product_code)) {
             return true;
         }
-        if (item.product_module_code && !activeModules.has(item.product_module_code)) {
+        if (item.product_module_code &&
+            !activeModules.has(item.product_module_code)) {
             return true;
         }
         return false;
@@ -152,5 +255,6 @@ exports.MenuService = MenuService = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, common_1.Inject)(database_module_1.PG_POOL)),
     __metadata("design:paramtypes", [pg_1.Pool,
-        config_1.ConfigService])
+        config_1.ConfigService,
+        super_user_service_1.SuperUserService])
 ], MenuService);

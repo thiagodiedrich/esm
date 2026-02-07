@@ -12,12 +12,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RbacGuard = void 0;
 const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
+const super_user_service_1 = require("../auth/super-user.service");
 const rbac_constants_1 = require("./rbac.constants");
 let RbacGuard = class RbacGuard {
-    constructor(reflector) {
+    constructor(reflector, superUserService) {
         this.reflector = reflector;
+        this.superUserService = superUserService;
     }
-    canActivate(context) {
+    async canActivate(context) {
         const requirement = this.reflector.getAllAndOverride(rbac_constants_1.PERMISSION_METADATA_KEY, [context.getHandler(), context.getClass()]);
         if (!requirement) {
             return true;
@@ -26,6 +28,9 @@ let RbacGuard = class RbacGuard {
         const user = request.user;
         if (!user) {
             throw new common_1.UnauthorizedException("Usuario nao autenticado.");
+        }
+        if (await this.superUserService.hasFullAccess(user)) {
+            return true;
         }
         const permissionKey = `${requirement.resource}:${requirement.action}`;
         const overrides = user.permission_overrides ?? [];
@@ -45,5 +50,6 @@ let RbacGuard = class RbacGuard {
 exports.RbacGuard = RbacGuard;
 exports.RbacGuard = RbacGuard = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [core_1.Reflector])
+    __metadata("design:paramtypes", [core_1.Reflector,
+        super_user_service_1.SuperUserService])
 ], RbacGuard);

@@ -26,6 +26,18 @@ __decorate([
     (0, swagger_1.ApiProperty)({ required: false, nullable: true, example: true }),
     __metadata("design:type", Object)
 ], OrganizationRequestDto.prototype, "is_default", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Email do primeiro usuario da organizacao (is_super_admin = true)" }),
+    __metadata("design:type", Object)
+], OrganizationRequestDto.prototype, "first_user_email", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Senha do primeiro usuario" }),
+    __metadata("design:type", Object)
+], OrganizationRequestDto.prototype, "first_user_password", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Nome do primeiro usuario" }),
+    __metadata("design:type", Object)
+], OrganizationRequestDto.prototype, "first_user_name", void 0);
 class WorkspaceRequestDto {
 }
 __decorate([
@@ -50,6 +62,14 @@ __decorate([
     (0, swagger_1.ApiProperty)({ required: false, nullable: true, example: "550e8400-e29b-41d4-a716-446655440002" }),
     __metadata("design:type", Object)
 ], UserRequestDto.prototype, "partner_id", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, nullable: true, description: "Obrigatorio se partner_id nao for informado (cria partner e associa ao usuario)" }),
+    __metadata("design:type", Object)
+], UserRequestDto.prototype, "organization_id", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, nullable: true, description: "Nome do contato (partner) quando organization_id e informado sem partner_id" }),
+    __metadata("design:type", Object)
+], UserRequestDto.prototype, "name", void 0);
 __decorate([
     (0, swagger_1.ApiProperty)({ required: false, nullable: true, example: true }),
     __metadata("design:type", Object)

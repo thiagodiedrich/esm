@@ -10,8 +10,12 @@ export interface AuthUserPayload {
   jti?: string;
   exp?: number;
   tenant_id?: string;
+  tenant_slug?: string;
   organization_id?: string;
+  organization_name?: string;
   workspace_id?: string | null;
+  workspace_name?: string | null;
+  name?: string;
   type?: "access" | "refresh";
   permissions?: string[];
   permission_overrides?: PermissionOverride[];

@@ -20,14 +20,20 @@ const common_1 = require("@nestjs/common");
 const jwt_1 = require("@nestjs/jwt");
 const config_1 = require("@nestjs/config");
 const bcrypt_1 = __importDefault(require("bcrypt"));
+const crypto_1 = require("crypto");
 const pg_1 = require("pg");
+const ioredis_1 = __importDefault(require("ioredis"));
 const database_module_1 = require("../database/database.module");
+const PREFIX_BLACKLIST_ACCESS = "auth:blacklist:access:";
+const PREFIX_BLACKLIST_REFRESH = "auth:blacklist:refresh:";
 let AuthService = class AuthService {
     constructor(jwtService, configService, pool) {
         this.jwtService = jwtService;
         this.configService = configService;
         this.pool = pool;
         this.loginAttempts = new Map();
+        const redisUrl = this.configService.get("REDIS_URL");
+        this.redis = redisUrl?.trim() ? new ioredis_1.default(redisUrl) : null;
     }
     async verifyUserToken(token) {
         return this.verifyToken(token);
@@ -37,14 +43,24 @@ let AuthService = class AuthService {
     }
     async verifyToken(token) {
         const algorithm = (this.configService.get("JWT_ALGORITHM") || "RS256");
+        let payload;
         try {
-            return await this.jwtService.verifyAsync(token, {
+            payload = await this.jwtService.verifyAsync(token, {
                 algorithms: [algorithm]
             });
         }
         catch (error) {
             throw new common_1.UnauthorizedException("Token invalido ou expirado.");
         }
+        if (payload.jti && this.redis) {
+            const prefix = payload.type === "refresh" ? PREFIX_BLACKLIST_REFRESH : PREFIX_BLACKLIST_ACCESS;
+            const key = `${prefix}${payload.jti}`;
+            const revoked = await this.redis.get(key);
+            if (revoked) {
+                throw new common_1.UnauthorizedException("Token revogado.");
+            }
+        }
+        return payload;
     }
     async validateUserCredentials(tenantId, email, password) {
         const key = `${tenantId}:${email.toLowerCase()}`;
@@ -67,6 +83,35 @@ let AuthService = class AuthService {
         this.clearFailedAttempts(key);
         return { id: user.id };
     }
+    /**
+     * Nomes para preencher o JWT (tenant_slug, name, organization_name, workspace_name).
+     * Usado em login e refresh para o frontend exibir header/contexto sem depender de GET /me.
+     */
+    async getLoginDisplayNames(tenantId, userId, organizationId, workspaceId) {
+        const slugResult = await this.pool.query("SELECT slug FROM tenants WHERE id = $1", [tenantId]);
+        const tenantSlug = slugResult.rows[0]?.slug ?? "";
+        const userResult = await this.pool.query("SELECT partner_id, email FROM res_users WHERE tenant_id = $1 AND id = $2", [tenantId, userId]);
+        let name = "Usuário";
+        if (userResult.rowCount) {
+            const pid = userResult.rows[0].partner_id;
+            const email = userResult.rows[0].email ?? "";
+            if (pid) {
+                const pResult = await this.pool.query("SELECT name FROM res_partners WHERE id = $1", [pid]);
+                name = (pResult.rows[0]?.name ?? email).trim() || email || "Usuário";
+            }
+            else {
+                name = email.trim() || "Usuário";
+            }
+        }
+        const orgResult = await this.pool.query("SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2", [organizationId, tenantId]);
+        const organizationName = orgResult.rows[0]?.name ?? "";
+        let workspaceName = null;
+        if (workspaceId) {
+            const wsResult = await this.pool.query("SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2", [workspaceId, organizationId]);
+            workspaceName = wsResult.rows[0]?.name ?? null;
+        }
+        return { tenantSlug, name, organizationName, workspaceName };
+    }
     async getUserById(tenantId, userId) {
         const result = await this.pool.query("SELECT id, tenant_id, partner_id, email, is_active FROM res_users WHERE tenant_id = $1 AND id = $2", [tenantId, userId]);
         if (result.rowCount === 0) {
@@ -81,19 +126,95 @@ let AuthService = class AuthService {
             is_active: user.is_active ?? null
         };
     }
+    /**
+     * Payload completo para GET /me: user_id, name, tenant_slug, organizations (com workspaces),
+     * current_context (com nomes e workspace_mode), requires_context_selection.
+     */
+    async getMePayload(tenantId, userId, context) {
+        const userResult = await this.pool.query(`SELECT u.id, u.tenant_id, u.partner_id, u.email, u.is_active, t.slug AS tenant_slug, p.name AS partner_name
+       FROM res_users u
+       JOIN tenants t ON t.id = u.tenant_id
+       LEFT JOIN res_partners p ON p.id = u.partner_id
+       WHERE u.tenant_id = $1 AND u.id = $2`, [tenantId, userId]);
+        if (userResult.rowCount === 0) {
+            return null;
+        }
+        const row = userResult.rows[0];
+        const name = (row.partner_name ?? row.email ?? "Usuário").trim() || "Usuário";
+        const orgsResult = await this.pool.query("SELECT id, name, is_default FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at", [tenantId]);
+        const orgIds = orgsResult.rows.map((o) => o.id);
+        let workspacesByOrg = new Map();
+        if (orgIds.length > 0) {
+            const wsResult = await this.pool.query("SELECT id, organization_id, name FROM res_workspaces WHERE organization_id = ANY($1::uuid[])", [orgIds]);
+            for (const ws of wsResult.rows) {
+                const list = workspacesByOrg.get(ws.organization_id) ?? [];
+                list.push({
+                    id: ws.id,
+                    name: ws.name ?? "",
+                    is_active: true
+                });
+                workspacesByOrg.set(ws.organization_id, list);
+            }
+        }
+        const organizations = orgsResult.rows.map((o) => ({
+            id: o.id,
+            name: o.name ?? "",
+            is_default: o.is_default ?? false,
+            workspaces: workspacesByOrg.get(o.id) ?? []
+        }));
+        let current_context = null;
+        const organizationId = context.organizationId;
+        const workspaceId = context.workspaceId ?? null;
+        if (organizationId) {
+            const orgRow = await this.pool.query("SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2", [organizationId, tenantId]);
+            const organization_name = orgRow.rowCount ? (orgRow.rows[0].name ?? "") : "";
+            let workspace_name = null;
+            if (workspaceId) {
+                const wsRow = await this.pool.query("SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2", [workspaceId, organizationId]);
+                workspace_name = wsRow.rowCount ? (wsRow.rows[0].name ?? null) : null;
+            }
+            const settingsRow = await this.pool.query("SELECT workspace_mode FROM res_organization_settings WHERE organization_id = $1", [organizationId]);
+            const workspace_mode = settingsRow.rows[0]?.workspace_mode === "required" ? "required" : "optional";
+            current_context = {
+                organization_id: organizationId,
+                organization_name,
+                workspace_id: workspaceId,
+                workspace_name,
+                workspace_mode
+            };
+        }
+        return {
+            user_id: row.id,
+            email: row.email ?? "",
+            name,
+            tenant_id: row.tenant_id,
+            tenant_slug: row.tenant_slug ?? "",
+            partner_id: row.partner_id,
+            is_active: row.is_active,
+            organizations,
+            current_context,
+            requires_context_selection: !current_context
+        };
+    }
     async issueTokens(input) {
         const accessMinutes = Number(this.configService.get("ACCESS_TOKEN_EXPIRE_MINUTES") || 15);
         const accessTtlSeconds = Math.max(1, accessMinutes) * 60;
         const refreshTtlSeconds = 7 * 24 * 60 * 60;
         const accessPayload = {
             sub: input.userId,
+            jti: (0, crypto_1.randomUUID)(),
             tenant_id: input.tenantId,
+            tenant_slug: input.tenantSlug,
             organization_id: input.organizationId,
+            organization_name: input.organizationName,
             workspace_id: input.workspaceId,
+            workspace_name: input.workspaceName,
+            name: input.name,
             type: "access"
         };
         const refreshPayload = {
             sub: input.userId,
+            jti: (0, crypto_1.randomUUID)(),
             tenant_id: input.tenantId,
             type: "refresh"
         };
@@ -106,6 +227,42 @@ let AuthService = class AuthService {
             refresh_token: refreshToken,
             expires_in: accessTtlSeconds
         };
+    }
+    /**
+     * Invalida o access token, revoga o refresh token (se informado) e registra o logout.
+     * Requer Redis para blacklist; sem Redis apenas loga (tokens continuam válidos até expirar).
+     */
+    async logout(accessToken, refreshToken) {
+        let accessPayload;
+        try {
+            accessPayload = await this.verifyUserToken(accessToken);
+        }
+        catch {
+            return null;
+        }
+        if (accessPayload.type !== "access" || !accessPayload.jti) {
+            return null;
+        }
+        const nowSec = Math.floor(Date.now() / 1000);
+        const accessTtlMs = Math.max(0, ((accessPayload.exp ?? nowSec) - nowSec) * 1000);
+        if (this.redis) {
+            await this.redis.set(`${PREFIX_BLACKLIST_ACCESS}${accessPayload.jti}`, "1", "PX", accessTtlMs);
+        }
+        if (refreshToken?.trim()) {
+            try {
+                const refreshPayload = await this.verifyUserToken(refreshToken);
+                if (refreshPayload.type === "refresh" && refreshPayload.jti) {
+                    const refreshTtlMs = Math.max(0, ((refreshPayload.exp ?? nowSec) - nowSec) * 1000);
+                    if (this.redis) {
+                        await this.redis.set(`${PREFIX_BLACKLIST_REFRESH}${refreshPayload.jti}`, "1", "PX", refreshTtlMs);
+                    }
+                }
+            }
+            catch {
+                // refresh inválido ou já expirado — ignorar
+            }
+        }
+        return { sub: accessPayload.sub, tenant_id: accessPayload.tenant_id };
     }
     assertNotBlocked(key) {
         const config = this.getFailbanConfig();

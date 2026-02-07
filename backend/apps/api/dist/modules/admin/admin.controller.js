@@ -46,6 +46,26 @@ __decorate([
     (0, swagger_1.ApiProperty)({ required: false, nullable: true, example: "pending" }),
     __metadata("design:type", Object)
 ], TenantRequestDto.prototype, "migration_status", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "UUID do tenant (opcional; usado para alinhar com TENANT_MASTER_ADMIN_TENANT_ID)" }),
+    __metadata("design:type", Object)
+], TenantRequestDto.prototype, "id", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Nome da primeira organização (cria org + partner + primeiro usuário)" }),
+    __metadata("design:type", Object)
+], TenantRequestDto.prototype, "first_organization_name", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Email do primeiro usuário (requer first_organization_name)" }),
+    __metadata("design:type", Object)
+], TenantRequestDto.prototype, "first_user_email", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Senha do primeiro usuário" }),
+    __metadata("design:type", Object)
+], TenantRequestDto.prototype, "first_user_password", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false, description: "Nome do primeiro usuário" }),
+    __metadata("design:type", Object)
+], TenantRequestDto.prototype, "first_user_name", void 0);
 class TenantStatusDto {
 }
 __decorate([

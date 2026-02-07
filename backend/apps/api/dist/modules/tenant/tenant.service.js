@@ -26,11 +26,55 @@ let TenantService = class TenantService {
         this.pool = pool;
     }
     async createOrganization(tenantId, input) {
-        const id = (0, crypto_1.randomUUID)();
-        const result = await this.pool.query(`INSERT INTO res_organizations (id, tenant_id, name, is_default, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, now(), now())
-       RETURNING id, tenant_id, name, is_default, created_at, updated_at`, [id, tenantId, input.name, input.is_default ?? false]);
-        return result.rows[0];
+        const orgId = (0, crypto_1.randomUUID)();
+        const createFirstUser = !!input.first_user_email?.trim() && !!input.first_user_password;
+        let transactionOpen = false;
+        try {
+            await this.pool.query("BEGIN");
+            transactionOpen = true;
+            await this.pool.query(`INSERT INTO res_organizations (id, tenant_id, partner_id, name, is_default, created_at, updated_at)
+         VALUES ($1, $2, NULL, $3, $4, now(), now())`, [orgId, tenantId, input.name, input.is_default ?? false]);
+            const partnerName = (input.first_user_name ?? input.name)?.trim() || input.name;
+            const partnerEmail = input.first_user_email?.trim() ?? null;
+            const partnerId = (0, crypto_1.randomUUID)();
+            await this.pool.query(`INSERT INTO res_partners (id, tenant_id, organization_id, name, email, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now(), now())`, [partnerId, tenantId, orgId, partnerName, partnerEmail]);
+            await this.pool.query("UPDATE res_organizations SET partner_id = $2, updated_at = now() WHERE id = $1 AND tenant_id = $3", [orgId, partnerId, tenantId]);
+            let user = null;
+            if (createFirstUser) {
+                const userEmail = input.first_user_email.trim();
+                const existing = await this.pool.query("SELECT id FROM res_users WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)", [tenantId, userEmail]);
+                if ((existing.rowCount ?? 0) > 0) {
+                    await this.pool.query("ROLLBACK");
+                    transactionOpen = false;
+                    throw new common_1.BadRequestException("Email ja cadastrado no tenant.");
+                }
+                const userId = (0, crypto_1.randomUUID)();
+                const passwordHash = await bcrypt_1.default.hash(input.first_user_password, 12);
+                await this.pool.query(`INSERT INTO res_users
+           (id, tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, TRUE, FALSE, TRUE, $6, now(), now())`, [userId, tenantId, partnerId, userEmail, passwordHash, orgId]);
+                user = {
+                    id: userId,
+                    tenant_id: tenantId,
+                    partner_id: partnerId,
+                    email: userEmail,
+                    is_super_admin: true,
+                    organization_id: orgId
+                };
+            }
+            await this.pool.query("COMMIT");
+            transactionOpen = false;
+            const orgRow = await this.pool.query(`SELECT id, tenant_id, partner_id, name, is_default, created_at, updated_at
+         FROM res_organizations WHERE id = $1`, [orgId]);
+            const org = orgRow.rows[0];
+            return user ? { ...org, user } : org;
+        }
+        catch (e) {
+            if (transactionOpen)
+                await this.pool.query("ROLLBACK");
+            throw e;
+        }
     }
     async listOrganizations(tenantId) {
         const result = await this.pool.query("SELECT id, tenant_id, name, is_default, created_at, updated_at FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at DESC", [tenantId]);
@@ -90,16 +134,56 @@ let TenantService = class TenantService {
         return { status: "ok" };
     }
     async createUser(tenantId, input) {
-        const existing = await this.pool.query("SELECT id FROM res_users WHERE tenant_id = $1 AND email = $2", [tenantId, input.email]);
-        if (existing.rowCount ?? 0) {
-            throw new common_1.BadRequestException("Email ja cadastrado.");
+        const existing = await this.pool.query("SELECT id FROM res_users WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)", [tenantId, input.email]);
+        if ((existing.rowCount ?? 0) > 0) {
+            throw new common_1.BadRequestException("Email ja cadastrado no tenant.");
         }
-        const id = (0, crypto_1.randomUUID)();
+        const hasPartnerId = !!input.partner_id?.trim();
+        const createPartner = !hasPartnerId && !!input.organization_id?.trim();
+        if (!hasPartnerId && !createPartner) {
+            throw new common_1.BadRequestException("Informe partner_id ou organization_id para criar o contato (partner) do usuario.");
+        }
+        if (createPartner) {
+            const org = await this.pool.query("SELECT id FROM res_organizations WHERE id = $1 AND tenant_id = $2", [input.organization_id, tenantId]);
+            if ((org.rowCount ?? 0) === 0) {
+                throw new common_1.BadRequestException("Organizacao invalida ou nao pertence ao tenant.");
+            }
+        }
+        const userId = (0, crypto_1.randomUUID)();
         const passwordHash = input.password ? await bcrypt_1.default.hash(input.password, 12) : null;
+        if (createPartner) {
+            const organizationId = input.organization_id.trim();
+            const partnerName = (input.name ?? input.email).trim();
+            const partnerId = (0, crypto_1.randomUUID)();
+            await this.pool.query("BEGIN");
+            try {
+                await this.pool.query(`INSERT INTO res_users
+           (id, tenant_id, partner_id, email, password_hash, is_active, organization_id, created_at, updated_at)
+           VALUES ($1, $2, NULL, $3, $4, $5, $6, now(), now())`, [userId, tenantId, input.email, passwordHash, input.is_active ?? true, organizationId]);
+                await this.pool.query(`INSERT INTO res_partners (id, tenant_id, organization_id, name, email, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, now(), now())`, [partnerId, tenantId, organizationId, partnerName, input.email]);
+                await this.pool.query("UPDATE res_users SET partner_id = $2, updated_at = now() WHERE id = $1 AND tenant_id = $3", [userId, partnerId, tenantId]);
+                await this.pool.query("COMMIT");
+            }
+            catch (e) {
+                await this.pool.query("ROLLBACK");
+                throw e;
+            }
+            const result = await this.pool.query(`SELECT id, tenant_id, partner_id, email, is_active, organization_id, created_at, updated_at
+         FROM res_users WHERE id = $1`, [userId]);
+            return result.rows[0];
+        }
         const result = await this.pool.query(`INSERT INTO res_users
        (id, tenant_id, partner_id, email, password_hash, is_active, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, now(), now())
-       RETURNING id, tenant_id, partner_id, email, is_active, created_at, updated_at`, [id, tenantId, input.partner_id ?? null, input.email, passwordHash, input.is_active ?? true]);
+       RETURNING id, tenant_id, partner_id, email, is_active, created_at, updated_at`, [
+            userId,
+            tenantId,
+            input.partner_id ?? null,
+            input.email,
+            passwordHash,
+            input.is_active ?? true
+        ]);
         return result.rows[0];
     }
     async listUsers(tenantId) {
