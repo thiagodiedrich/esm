@@ -4,7 +4,7 @@
  */
 
 import { api } from './client';
-import { healthUrl, apiOrigin } from './config';
+import { apiBaseUrl, apiOrigin, healthUrl } from './config';
 import {
   LoginRequest,
   LoginResponse,
@@ -166,7 +166,7 @@ export const telemetryApi = {
 };
 
 // ===============================
-// BRANDING — GET /api/branding/defaults (sem /v1)
+// BRANDING — Backend expõe em /api/branding (fora de /api/v1). Exceção: usa apiOrigin.
 // ===============================
 
 export const brandingApi = {

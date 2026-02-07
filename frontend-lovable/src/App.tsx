@@ -25,6 +25,8 @@ import SelectContextPage from "@/pages/SelectContext";
 import DashboardPage from "@/pages/Dashboard";
 import ForbiddenPage from "@/pages/Forbidden";
 import NotFoundPage from "@/pages/NotFound";
+import { TenantModule } from "@/pages/tenant/TenantModule";
+import { AdminModule } from "@/pages/admin/AdminModule";
 
 // Health check on startup (syncs to store for banner)
 import { BackendHealthChecker } from "@/components/BackendHealthChecker";
@@ -94,9 +96,11 @@ const App = () => (
             {/* Telemetry Product Routes */}
             <Route path="/telemetry/*" element={<DashboardPage />} />
 
-            {/* Admin, Tenant e outras rotas do menu */}
-            <Route path="/admin/*" element={<DashboardPage />} />
-            <Route path="/tenant/*" element={<DashboardPage />} />
+            {/* Admin: listagem e edição (tenants, plans, platform-products, permissions) */}
+            <Route path="/admin/*" element={<AdminModule />} />
+
+            {/* Tenant: listagem e edição (users, organizations, workspaces, partners, roles) */}
+            <Route path="/tenant/*" element={<TenantModule />} />
           </Route>
 
           {/* Catch-all */}

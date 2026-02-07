@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useLogin } from '@/auth/hooks';
 import { useBackendHealthStore } from '@/stores/backendHealth.store';
+import { apiBaseUrl } from '@/api/config';
 import type { ApiError } from '@/api/types';
 
 export default function LoginPage() {
@@ -106,7 +107,7 @@ export default function LoginPage() {
               <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <p>
                   {(login.error as ApiError).type === 'NETWORK_ERROR'
-                    ? 'Sem comunicação com o backend. Verifique se a API está em execução (ex.: http://localhost:3000).'
+                    ? `Sem comunicação com o backend. Verifique se a API está em execução (${apiBaseUrl}).`
                     : login.error.message || 'Erro ao fazer login'}
                 </p>
               </div>

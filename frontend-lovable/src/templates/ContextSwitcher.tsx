@@ -9,7 +9,8 @@
  */
 
 import { useState } from 'react';
-import { Building2, ChevronDown, Layers, Globe } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Building2, ChevronDown, Layers, Globe, Settings } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,13 +29,12 @@ import { Organization, Workspace } from '@/api/types';
 import { cn } from '@/lib/utils';
 
 export function ContextSwitcher() {
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const currentContext = useAuthStore((s) => s.currentContext);
   const contextSwitch = useContextSwitch();
   const [open, setOpen] = useState(false);
-  
-  if (!user) return null;
-  
+
   const handleSwitch = (orgId: string, workspaceId: string | null) => {
     contextSwitch.mutate(
       { organization_id: orgId, workspace_id: workspaceId },
@@ -42,10 +42,14 @@ export function ContextSwitcher() {
     );
   };
   
-  const tenantSlug = user.tenant_slug || user.tenant_id?.slice(0, 8) || '';
+  const tenantSlug = user?.tenant_slug || (user?.tenant_id ?? '').slice(0, 8) || '';
   const currentOrgName = currentContext?.organization_name || 'Selecionar organização';
   const currentWorkspaceName = currentContext?.workspace_name;
-  
+  const organizations = user?.organizations ?? [];
+  const hasOrganizations = organizations.length > 0;
+
+  if (!user) return null;
+
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -81,8 +85,13 @@ export function ContextSwitcher() {
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel>Organizações</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        
-        {(user.organizations ?? []).map((org) => (
+        {!hasOrganizations && (
+          <DropdownMenuItem onClick={() => { setOpen(false); navigate('/select-context'); }}>
+            <Settings className="mr-2 h-4 w-4" />
+            Selecionar organização e workspace
+          </DropdownMenuItem>
+        )}
+        {hasOrganizations && organizations.map((org) => (
           <OrganizationItem
             key={org.id}
             organization={org}

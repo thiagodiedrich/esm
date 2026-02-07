@@ -7,7 +7,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { authApi, contextApi } from '@/api/endpoints';
 import { useAuthStore } from '@/stores/auth.store';
 import { useMenuStore } from '@/stores/menu.store';
@@ -66,9 +66,10 @@ export function useLogin() {
       useRecoveryStore.getState().resetRetry();
       // Busca sessão completa (organizations, tenant_slug) via auth/me
       try {
-        const raw = await authApi.getMe();
+        const raw = await authApi.getMe() as Record<string, unknown>;
         const session = {
           ...raw,
+          user_id: raw.user_id ?? raw.id,
           organizations: Array.isArray(raw.organizations) ? raw.organizations : [],
         };
         useAuthStore.getState().setUser(session);
@@ -114,16 +115,17 @@ export function useLogout() {
     },
   });
   
-  // Listen for forced logout events per ERROR_HANDLING.md
+  // Listen for forced logout events per ERROR_HANDLING.md (ref evita re-registro a cada render)
+  const mutateRef = useRef(mutation.mutate);
+  mutateRef.current = mutation.mutate;
   useEffect(() => {
     const handleForceLogout = () => {
-      mutation.mutate();
+      mutateRef.current();
     };
-    
     window.addEventListener('auth:logout', handleForceLogout);
     return () => window.removeEventListener('auth:logout', handleForceLogout);
-  }, [mutation]);
-  
+  }, []);
+
   return mutation;
 }
 
