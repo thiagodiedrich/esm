@@ -14,6 +14,13 @@ export class TenancyMiddleware implements NestMiddleware {
   ) {}
 
   async use(req: FastifyRequest, _res: FastifyReply, next: () => void) {
+    if (this.isPreflight(req)) {
+      return next();
+    }
+    if (this.isPublicRoute(req)) {
+      return next();
+    }
+
     const enabled =
       (this.configService.get<string>("MULTI_TENANT_ENABLED") ?? "false").toLowerCase() === "true";
     if (!enabled) {
@@ -92,6 +99,34 @@ export class TenancyMiddleware implements NestMiddleware {
     return next();
   }
 
+  private isPreflight(req: FastifyRequest): boolean {
+    const method =
+      String((req as { method?: string }).method ?? (req.raw as { method?: string })?.method ?? "")
+        .toUpperCase();
+    return method === "OPTIONS";
+  }
+
+  private isPublicRoute(req: FastifyRequest): boolean {
+    const raw =
+      this.configService.get<string>("API_PUBLIC_ROUTES")?.trim() ||
+      process.env.API_PUBLIC_ROUTES?.trim();
+    if (!raw) return false;
+    const path = this.normalizePath(
+      (req as { url?: string; routerPath?: string }).url ??
+        (req as { routerPath?: string }).routerPath ??
+        (req.raw as { url?: string } | undefined)?.url ??
+        ""
+    );
+    const prefixes = raw.split(",").map((p) => this.normalizePath(p.trim())).filter(Boolean);
+    return prefixes.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+  }
+
+  private normalizePath(p: string): string {
+    const path = (p ?? "").split("?")[0].trim() || "/";
+    const withSlash = path.startsWith("/") ? path : "/" + path;
+    return withSlash.endsWith("/") && withSlash.length > 1 ? withSlash.slice(0, -1) : withSlash;
+  }
+
   private getHeaderValue(req: FastifyRequest, headerName: string) {
     const value = req.headers[headerName];
     if (typeof value === "string" && value.trim()) {
@@ -111,20 +146,22 @@ export class TenancyMiddleware implements NestMiddleware {
   }
 
   private async ensureTenantExists(value: string, field: "id" | "slug") {
-    const query = field === "id" ? "SELECT id FROM tenants WHERE id = $1" : "SELECT id FROM tenants WHERE slug = $1";
+    const query = field === "id" ? "SELECT id FROM tenants WHERE uuid = $1" : "SELECT id FROM tenants WHERE slug = $1";
     const result = await this.pool.query(query, [value]);
     if ((result.rowCount ?? 0) === 0) {
       throw new BadRequestException("Code 7: Tenant nao encontrado");
     }
   }
 
-  private async ensureOrganizationExists(value: string, tenantId: string | null) {
-    const result = tenantId
+  private async ensureOrganizationExists(value: string, tenantUuid: string | null) {
+    const result = tenantUuid
       ? await this.pool.query(
-          "SELECT id FROM res_organizations WHERE id = $1 AND tenant_id = $2",
-          [value, tenantId]
+          `SELECT o.id FROM res_organizations o
+           JOIN tenants t ON t.id = o.tenant_id
+           WHERE o.uuid = $1 AND t.uuid = $2`,
+          [value, tenantUuid]
         )
-      : await this.pool.query("SELECT id FROM res_organizations WHERE id = $1", [value]);
+      : await this.pool.query("SELECT id FROM res_organizations WHERE uuid = $1", [value]);
     if ((result.rowCount ?? 0) === 0) {
       throw new BadRequestException("Organizacao nao encontrada.");
     }
@@ -132,25 +169,27 @@ export class TenancyMiddleware implements NestMiddleware {
 
   private async ensureWorkspaceExists(
     value: string,
-    organizationId: string | null,
-    tenantId: string | null
+    organizationUuid: string | null,
+    tenantUuid: string | null
   ) {
     let result;
-    if (organizationId) {
+    if (organizationUuid) {
       result = await this.pool.query(
-        "SELECT id FROM res_workspaces WHERE id = $1 AND organization_id = $2",
-        [value, organizationId]
+        `SELECT w.id FROM res_workspaces w
+         JOIN res_organizations o ON o.id = w.organization_id
+         WHERE w.uuid = $1 AND o.uuid = $2`,
+        [value, organizationUuid]
       );
-    } else if (tenantId) {
+    } else if (tenantUuid) {
       result = await this.pool.query(
-        `SELECT rw.id
-         FROM res_workspaces rw
-         JOIN res_organizations ro ON ro.id = rw.organization_id
-         WHERE rw.id = $1 AND ro.tenant_id = $2`,
-        [value, tenantId]
+        `SELECT w.id FROM res_workspaces w
+         JOIN res_organizations o ON o.id = w.organization_id
+         JOIN tenants t ON t.id = o.tenant_id
+         WHERE w.uuid = $1 AND t.uuid = $2`,
+        [value, tenantUuid]
       );
     } else {
-      result = await this.pool.query("SELECT id FROM res_workspaces WHERE id = $1", [value]);
+      result = await this.pool.query("SELECT id FROM res_workspaces WHERE uuid = $1", [value]);
     }
     if ((result.rowCount ?? 0) === 0) {
       throw new BadRequestException("Workspace nao encontrado.");

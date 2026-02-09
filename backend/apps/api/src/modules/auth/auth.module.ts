@@ -5,6 +5,7 @@ import { readFileSync } from "fs";
 import type { Algorithm } from "jsonwebtoken";
 import { AuthService } from "./auth.service";
 import { SuperUserService } from "./super-user.service";
+import { LoginRateLimitGuard } from "./login-rate-limit.guard";
 import { DatabaseModule } from "../database/database.module";
 
 @Module({
@@ -48,7 +49,7 @@ import { DatabaseModule } from "../database/database.module";
       }
     })
   ],
-  providers: [AuthService, SuperUserService],
+  providers: [AuthService, SuperUserService, LoginRateLimitGuard],
   exports: [AuthService, SuperUserService]
 })
 export class AuthModule {}

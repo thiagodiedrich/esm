@@ -36,7 +36,7 @@ let TenantMigrationService = class TenantMigrationService {
            telemetry_db = $4,
            migration_status = $5,
            updated_at = now()
-       WHERE id = $6`, [
+       WHERE uuid = $6`, [
             input.db_strategy,
             input.control_plane_db ?? null,
             input.erp_db ?? null,

@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { Pool } from "pg";
-import { randomUUID } from "crypto";
 import { PG_POOL } from "../database/database.module";
+import { resolveUuidToId } from "../database/uuid-resolver";
 
 export interface UsageMetricInput {
   tenant_id: string;
@@ -28,13 +28,17 @@ export class UsageService {
       throw new BadRequestException("Metric key nao permitido.");
     }
 
+    const tenantId = await resolveUuidToId(this.pool, "tenants", input.tenant_id);
+    if (!tenantId) {
+      throw new BadRequestException("Tenant nao encontrado.");
+    }
+
     await this.pool.query(
       `INSERT INTO tenant_usage_metrics
-       (id, tenant_id, metric_key, metric_value, period, source, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())`,
+       (tenant_id, metric_key, metric_value, period, source, created_at)
+       VALUES ($1, $2, $3, $4, $5, now())`,
       [
-        randomUUID(),
-        input.tenant_id,
+        tenantId,
         input.metric_key,
         input.metric_value,
         input.period,

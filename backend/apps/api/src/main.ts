@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { ConfigService } from "@nestjs/config";
@@ -38,13 +39,28 @@ async function bootstrap() {
   const port = Number(config.get("PORT")) || 3000;
   const host = config.get<string>("HOST") || "0.0.0.0";
 
-  const corsOriginsRaw = config.get<string>("CORS_ORIGINS");
+  const corsOriginsRaw = config.get<string>("CORS_ORIGINS")?.trim();
+  const nodeEnv = (config.get<string>("NODE_ENV") ?? "development").toLowerCase();
+  const isProduction = nodeEnv === "production";
+
   if (corsOriginsRaw) {
     const origins = corsOriginsRaw.split(",").map((origin) => origin.trim()).filter(Boolean);
     app.enableCors({
       origin: origins.length > 0 ? origins : false,
       credentials: true
     });
+  } else {
+    const bootstrapLogger = new Logger("Bootstrap");
+    if (isProduction) {
+      bootstrapLogger.warn(
+        "CORS_ORIGINS nao configurado. Requisicoes cross-origin serao bloqueadas pelo navegador. Configure CORS_ORIGINS no .env."
+      );
+    } else {
+      app.enableCors({ origin: true, credentials: true });
+      bootstrapLogger.warn(
+        "CORS_ORIGINS vazio ou ausente; permitindo todas as origens (NODE_ENV=development)."
+      );
+    }
   }
 
   const rateLimitMax = Number(config.get("RATE_LIMIT_PER_MINUTE") ?? 0);

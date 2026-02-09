@@ -49,9 +49,9 @@ let SuperUserService = class SuperUserService {
             return true;
         }
         if (row.user_is_super_admin &&
-            row.user_organization_id &&
+            row.user_organization_uuid &&
             user.organization_id &&
-            row.user_organization_id === user.organization_id) {
+            row.user_organization_uuid === user.organization_id) {
             return true;
         }
         return false;
@@ -65,11 +65,12 @@ let SuperUserService = class SuperUserService {
         const result = await this.pool.query(`SELECT
          u.is_super_tenant AS user_is_super_tenant,
          u.is_super_admin AS user_is_super_admin,
-         u.organization_id AS user_organization_id,
+         o.uuid AS user_organization_uuid,
          COALESCE(t.is_super_tenant, false) AS tenant_is_super_tenant
        FROM res_users u
        JOIN tenants t ON t.id = u.tenant_id
-       WHERE u.id = $1 AND u.tenant_id = $2`, [userId, tenantId]);
+       LEFT JOIN res_organizations o ON o.id = u.organization_id
+       WHERE u.uuid = $1 AND t.uuid = $2`, [userId, tenantId]);
         if (result.rowCount === 0) {
             return null;
         }

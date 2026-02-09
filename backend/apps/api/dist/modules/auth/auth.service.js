@@ -62,10 +62,14 @@ let AuthService = class AuthService {
         }
         return payload;
     }
-    async validateUserCredentials(tenantId, email, password) {
-        const key = `${tenantId}:${email.toLowerCase()}`;
+    async validateUserCredentials(tenantUuid, email, password) {
+        const key = `${tenantUuid}:${email.toLowerCase()}`;
         this.assertNotBlocked(key);
-        const result = await this.pool.query("SELECT id, password_hash, is_active FROM res_users WHERE tenant_id = $1 AND email = $2", [tenantId, email]);
+        const tenantIdRes = await this.pool.query("SELECT id FROM tenants WHERE uuid = $1", [tenantUuid]);
+        if (tenantIdRes.rowCount === 0)
+            return null;
+        const tenantId = tenantIdRes.rows[0].id;
+        const result = await this.pool.query("SELECT id, uuid, password_hash, is_active FROM res_users WHERE tenant_id = $1 AND email = $2", [tenantId, email]);
         if (result.rowCount === 0) {
             this.registerFailedAttempt(key);
             return null;
@@ -81,16 +85,18 @@ let AuthService = class AuthService {
             return null;
         }
         this.clearFailedAttempts(key);
-        return { id: user.id };
+        return { id: user.id, uuid: user.uuid };
     }
     /**
      * Nomes para preencher o JWT (tenant_slug, name, organization_name, workspace_name).
      * Usado em login e refresh para o frontend exibir header/contexto sem depender de GET /me.
      */
-    async getLoginDisplayNames(tenantId, userId, organizationId, workspaceId) {
-        const slugResult = await this.pool.query("SELECT slug FROM tenants WHERE id = $1", [tenantId]);
+    async getLoginDisplayNames(tenantUuid, userUuid, organizationUuid, workspaceUuid) {
+        const slugResult = await this.pool.query("SELECT slug FROM tenants WHERE uuid = $1", [tenantUuid]);
         const tenantSlug = slugResult.rows[0]?.slug ?? "";
-        const userResult = await this.pool.query("SELECT partner_id, email FROM res_users WHERE tenant_id = $1 AND id = $2", [tenantId, userId]);
+        const userResult = await this.pool.query(`SELECT u.partner_id, u.email FROM res_users u
+       JOIN tenants t ON t.id = u.tenant_id
+       WHERE t.uuid = $1 AND u.uuid = $2`, [tenantUuid, userUuid]);
         let name = "Usuário";
         if (userResult.rowCount) {
             const pid = userResult.rows[0].partner_id;
@@ -103,24 +109,32 @@ let AuthService = class AuthService {
                 name = email.trim() || "Usuário";
             }
         }
-        const orgResult = await this.pool.query("SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2", [organizationId, tenantId]);
+        const orgResult = await this.pool.query(`SELECT o.name FROM res_organizations o
+       JOIN tenants t ON t.id = o.tenant_id
+       WHERE o.uuid = $1 AND t.uuid = $2`, [organizationUuid, tenantUuid]);
         const organizationName = orgResult.rows[0]?.name ?? "";
         let workspaceName = null;
-        if (workspaceId) {
-            const wsResult = await this.pool.query("SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2", [workspaceId, organizationId]);
+        if (workspaceUuid) {
+            const wsResult = await this.pool.query(`SELECT w.name FROM res_workspaces w
+         JOIN res_organizations o ON o.id = w.organization_id
+         WHERE w.uuid = $1 AND o.uuid = $2`, [workspaceUuid, organizationUuid]);
             workspaceName = wsResult.rows[0]?.name ?? null;
         }
         return { tenantSlug, name, organizationName, workspaceName };
     }
-    async getUserById(tenantId, userId) {
-        const result = await this.pool.query("SELECT id, tenant_id, partner_id, email, is_active FROM res_users WHERE tenant_id = $1 AND id = $2", [tenantId, userId]);
+    async getUserById(tenantUuid, userUuid) {
+        const result = await this.pool.query(`SELECT u.id, u.uuid, u.tenant_id, u.partner_id, u.email, u.is_active, t.uuid AS tenant_uuid
+       FROM res_users u
+       JOIN tenants t ON t.id = u.tenant_id
+       WHERE t.uuid = $1 AND u.uuid = $2`, [tenantUuid, userUuid]);
         if (result.rowCount === 0) {
             return null;
         }
         const user = result.rows[0];
         return {
             id: user.id,
-            tenant_id: user.tenant_id,
+            uuid: user.uuid,
+            tenant_id: user.tenant_uuid,
             partner_id: user.partner_id ?? null,
             email: user.email ?? "",
             is_active: user.is_active ?? null
@@ -130,26 +144,30 @@ let AuthService = class AuthService {
      * Payload completo para GET /me: user_id, name, tenant_slug, organizations (com workspaces),
      * current_context (com nomes e workspace_mode), requires_context_selection.
      */
-    async getMePayload(tenantId, userId, context) {
-        const userResult = await this.pool.query(`SELECT u.id, u.tenant_id, u.partner_id, u.email, u.is_active, t.slug AS tenant_slug, p.name AS partner_name
+    async getMePayload(tenantUuid, userUuid, context) {
+        const userResult = await this.pool.query(`SELECT u.id, u.uuid, u.tenant_id, u.partner_id, p.uuid AS partner_uuid, u.email, u.is_active, t.slug AS tenant_slug, p.name AS partner_name
        FROM res_users u
        JOIN tenants t ON t.id = u.tenant_id
        LEFT JOIN res_partners p ON p.id = u.partner_id
-       WHERE u.tenant_id = $1 AND u.id = $2`, [tenantId, userId]);
+       WHERE t.uuid = $1 AND u.uuid = $2`, [tenantUuid, userUuid]);
         if (userResult.rowCount === 0) {
             return null;
         }
         const row = userResult.rows[0];
         const name = (row.partner_name ?? row.email ?? "Usuário").trim() || "Usuário";
-        const orgsResult = await this.pool.query("SELECT id, name, is_default FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at", [tenantId]);
+        const tenantIdRes = await this.pool.query("SELECT id FROM tenants WHERE uuid = $1", [tenantUuid]);
+        const tenantId = tenantIdRes.rows[0]?.id;
+        if (!tenantId)
+            return null;
+        const orgsResult = await this.pool.query("SELECT id, uuid, name, is_default FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at", [tenantId]);
         const orgIds = orgsResult.rows.map((o) => o.id);
         let workspacesByOrg = new Map();
         if (orgIds.length > 0) {
-            const wsResult = await this.pool.query("SELECT id, organization_id, name FROM res_workspaces WHERE organization_id = ANY($1::uuid[])", [orgIds]);
+            const wsResult = await this.pool.query("SELECT id, uuid, organization_id, name FROM res_workspaces WHERE organization_id = ANY($1::int[])", [orgIds]);
             for (const ws of wsResult.rows) {
                 const list = workspacesByOrg.get(ws.organization_id) ?? [];
                 list.push({
-                    id: ws.id,
+                    id: ws.uuid,
                     name: ws.name ?? "",
                     is_active: true
                 });
@@ -157,39 +175,46 @@ let AuthService = class AuthService {
             }
         }
         const organizations = orgsResult.rows.map((o) => ({
-            id: o.id,
+            id: o.uuid,
             name: o.name ?? "",
             is_default: o.is_default ?? false,
             workspaces: workspacesByOrg.get(o.id) ?? []
         }));
         let current_context = null;
-        const organizationId = context.organizationId;
-        const workspaceId = context.workspaceId ?? null;
-        if (organizationId) {
-            const orgRow = await this.pool.query("SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2", [organizationId, tenantId]);
+        const organizationUuid = context.organizationId;
+        const workspaceUuid = context.workspaceId ?? null;
+        if (organizationUuid) {
+            const orgRow = await this.pool.query(`SELECT o.name FROM res_organizations o
+         JOIN tenants t ON t.id = o.tenant_id
+         WHERE o.uuid = $1 AND t.uuid = $2`, [organizationUuid, tenantUuid]);
             const organization_name = orgRow.rowCount ? (orgRow.rows[0].name ?? "") : "";
             let workspace_name = null;
-            if (workspaceId) {
-                const wsRow = await this.pool.query("SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2", [workspaceId, organizationId]);
+            if (workspaceUuid) {
+                const wsRow = await this.pool.query(`SELECT w.name FROM res_workspaces w
+           JOIN res_organizations o ON o.id = w.organization_id
+           WHERE w.uuid = $1 AND o.uuid = $2`, [workspaceUuid, organizationUuid]);
                 workspace_name = wsRow.rowCount ? (wsRow.rows[0].name ?? null) : null;
             }
-            const settingsRow = await this.pool.query("SELECT workspace_mode FROM res_organization_settings WHERE organization_id = $1", [organizationId]);
+            const settingsRow = await this.pool.query(`SELECT s.workspace_mode FROM res_organization_settings s
+         JOIN res_organizations o ON o.id = s.organization_id
+         WHERE o.uuid = $1`, [organizationUuid]);
             const workspace_mode = settingsRow.rows[0]?.workspace_mode === "required" ? "required" : "optional";
             current_context = {
-                organization_id: organizationId,
+                organization_id: organizationUuid,
                 organization_name,
-                workspace_id: workspaceId,
+                workspace_id: workspaceUuid,
                 workspace_name,
                 workspace_mode
             };
         }
+        const tenantUuidRes = await this.pool.query("SELECT uuid FROM tenants WHERE id = $1", [row.tenant_id]);
         return {
-            user_id: row.id,
+            user_id: row.uuid,
             email: row.email ?? "",
             name,
-            tenant_id: row.tenant_id,
+            tenant_id: tenantUuidRes.rows[0]?.uuid ?? "",
             tenant_slug: row.tenant_slug ?? "",
-            partner_id: row.partner_id,
+            partner_id: row.partner_uuid ?? null,
             is_active: row.is_active,
             organizations,
             current_context,

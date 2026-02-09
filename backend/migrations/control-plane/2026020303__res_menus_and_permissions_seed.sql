@@ -1,22 +1,13 @@
 -- Menus na base de dados e permissões (funcionalidades) para controle de acesso.
 -- Permite criar menus e acessos que a UI pode consumir depois.
---
--- Endpoints que já existem:
---   Admin: tenants (CRUD + PATCH status), plans (CRUD + PATCH status)
---   Tenant: organizations (CRUD), workspaces (CRUD), users (CRUD + PATCH password + PATCH status)
---
--- Endpoints que faltam criar (para as tabelas/ menus abaixo):
---   Admin: platform_products, platform_product_modules, tenant_platform_products,
---          tenant_usage_metrics (leitura), res_permissions (CRUD)
---   Tenant: res_partners (Contatos), res_roles, res_user_roles, res_user_permission_overrides,
---           res_organization_settings (por organização)
 
 BEGIN;
 
 -- Tabela de itens de menu (fonte única para menus + rotas + recurso/ação)
 CREATE TABLE IF NOT EXISTS res_menus (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  parent_id UUID REFERENCES res_menus(id) ON DELETE SET NULL,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  parent_id INTEGER REFERENCES res_menus(id) ON DELETE SET NULL,
   label VARCHAR NOT NULL,
   icon VARCHAR,
   route VARCHAR,
@@ -34,8 +25,8 @@ CREATE INDEX IF NOT EXISTS idx_res_menus_parent ON res_menus(parent_id);
 CREATE INDEX IF NOT EXISTS idx_res_menus_scope ON res_menus(scope);
 
 -- Seed: permissões (funcionalidades) por recurso e ação (idempotente: ignora se já existir)
-INSERT INTO res_permissions (id, resource, action, description)
-SELECT gen_random_uuid(), v.resource, v.action, v.description
+INSERT INTO res_permissions (resource, action, description, created_at)
+SELECT v.resource, v.action, v.description, now()
 FROM (VALUES
   ('admin.tenant', 'read', 'Listar e ver tenants'),
   ('admin.tenant', 'create', 'Criar tenant'),
@@ -100,22 +91,22 @@ WHERE NOT EXISTS (
 );
 
 -- Seed: itens de menu (Admin) — só insere se ainda não existir menu admin
-INSERT INTO res_menus (id, parent_id, label, icon, route, resource, action, sequence, scope)
-SELECT gen_random_uuid(), NULL::uuid, 'Tenants', 'building', '/admin/tenants', 'admin.tenant', 'read', 10, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Planos', 'credit-card', '/admin/plans', 'admin.plan', 'read', 20, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Produtos (plataforma)', 'package', '/admin/platform-products', 'admin.platform_product', 'read', 30, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Aplicativos', 'grid', '/admin/product-modules', 'admin.platform_product_module', 'read', 40, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Produtos do tenant', 'layers', '/admin/tenant-products', 'admin.tenant_platform_product', 'read', 50, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Permissões', 'shield', '/admin/permissions', 'admin.permission', 'read', 60, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Métricas de uso', 'bar-chart', '/admin/usage-metrics', 'admin.tenant_usage_metrics', 'read', 70, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1);
+INSERT INTO res_menus (parent_id, label, icon, route, resource, action, sequence, scope)
+SELECT NULL::integer, 'Tenants', 'building', '/admin/tenants', 'admin.tenant', 'read', 10, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Planos', 'credit-card', '/admin/plans', 'admin.plan', 'read', 20, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Produtos (plataforma)', 'package', '/admin/platform-products', 'admin.platform_product', 'read', 30, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Aplicativos', 'grid', '/admin/product-modules', 'admin.platform_product_module', 'read', 40, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Produtos do tenant', 'layers', '/admin/tenant-products', 'admin.tenant_platform_product', 'read', 50, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Permissões', 'shield', '/admin/permissions', 'admin.permission', 'read', 60, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Métricas de uso', 'bar-chart', '/admin/usage-metrics', 'admin.tenant_usage_metrics', 'read', 70, 'admin' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'admin' LIMIT 1);
 
 -- Seed: itens de menu (Tenant) — só insere se ainda não existir menu tenant
-INSERT INTO res_menus (id, parent_id, label, icon, route, resource, action, sequence, scope)
-SELECT gen_random_uuid(), NULL::uuid, 'Contatos', 'users', '/tenant/partners', 'tenant.partner', 'read', 10, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Empresas', 'building', '/tenant/organizations', 'tenant.organization', 'read', 20, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Usuários', 'user', '/tenant/users', 'tenant.user', 'read', 30, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Workspaces', 'folder', '/tenant/workspaces', 'tenant.workspace', 'read', 40, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Regras de acesso', 'lock', '/tenant/roles', 'tenant.role', 'read', 50, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
-UNION ALL SELECT gen_random_uuid(), NULL::uuid, 'Configurações da empresa', 'settings', '/tenant/organization-settings', 'tenant.organization_settings', 'read', 60, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1);
+INSERT INTO res_menus (parent_id, label, icon, route, resource, action, sequence, scope)
+SELECT NULL::integer, 'Contatos', 'users', '/tenant/partners', 'tenant.partner', 'read', 10, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Empresas', 'building', '/tenant/organizations', 'tenant.organization', 'read', 20, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Usuários', 'user', '/tenant/users', 'tenant.user', 'read', 30, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Workspaces', 'folder', '/tenant/workspaces', 'tenant.workspace', 'read', 40, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Regras de acesso', 'lock', '/tenant/roles', 'tenant.role', 'read', 50, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1)
+UNION ALL SELECT NULL::integer, 'Configurações da empresa', 'settings', '/tenant/organization-settings', 'tenant.organization_settings', 'read', 60, 'tenant' WHERE NOT EXISTS (SELECT 1 FROM res_menus WHERE scope = 'tenant' LIMIT 1);
 
 COMMIT;

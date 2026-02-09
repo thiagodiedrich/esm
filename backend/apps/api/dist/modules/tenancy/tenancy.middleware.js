@@ -106,33 +106,37 @@ let TenancyMiddleware = class TenancyMiddleware {
         return subdomain?.trim() || undefined;
     }
     async ensureTenantExists(value, field) {
-        const query = field === "id" ? "SELECT id FROM tenants WHERE id = $1" : "SELECT id FROM tenants WHERE slug = $1";
+        const query = field === "id" ? "SELECT id FROM tenants WHERE uuid = $1" : "SELECT id FROM tenants WHERE slug = $1";
         const result = await this.pool.query(query, [value]);
         if ((result.rowCount ?? 0) === 0) {
             throw new common_1.BadRequestException("Code 7: Tenant nao encontrado");
         }
     }
-    async ensureOrganizationExists(value, tenantId) {
-        const result = tenantId
-            ? await this.pool.query("SELECT id FROM res_organizations WHERE id = $1 AND tenant_id = $2", [value, tenantId])
-            : await this.pool.query("SELECT id FROM res_organizations WHERE id = $1", [value]);
+    async ensureOrganizationExists(value, tenantUuid) {
+        const result = tenantUuid
+            ? await this.pool.query(`SELECT o.id FROM res_organizations o
+           JOIN tenants t ON t.id = o.tenant_id
+           WHERE o.uuid = $1 AND t.uuid = $2`, [value, tenantUuid])
+            : await this.pool.query("SELECT id FROM res_organizations WHERE uuid = $1", [value]);
         if ((result.rowCount ?? 0) === 0) {
             throw new common_1.BadRequestException("Organizacao nao encontrada.");
         }
     }
-    async ensureWorkspaceExists(value, organizationId, tenantId) {
+    async ensureWorkspaceExists(value, organizationUuid, tenantUuid) {
         let result;
-        if (organizationId) {
-            result = await this.pool.query("SELECT id FROM res_workspaces WHERE id = $1 AND organization_id = $2", [value, organizationId]);
+        if (organizationUuid) {
+            result = await this.pool.query(`SELECT w.id FROM res_workspaces w
+         JOIN res_organizations o ON o.id = w.organization_id
+         WHERE w.uuid = $1 AND o.uuid = $2`, [value, organizationUuid]);
         }
-        else if (tenantId) {
-            result = await this.pool.query(`SELECT rw.id
-         FROM res_workspaces rw
-         JOIN res_organizations ro ON ro.id = rw.organization_id
-         WHERE rw.id = $1 AND ro.tenant_id = $2`, [value, tenantId]);
+        else if (tenantUuid) {
+            result = await this.pool.query(`SELECT w.id FROM res_workspaces w
+         JOIN res_organizations o ON o.id = w.organization_id
+         JOIN tenants t ON t.id = o.tenant_id
+         WHERE w.uuid = $1 AND t.uuid = $2`, [value, tenantUuid]);
         }
         else {
-            result = await this.pool.query("SELECT id FROM res_workspaces WHERE id = $1", [value]);
+            result = await this.pool.query("SELECT id FROM res_workspaces WHERE uuid = $1", [value]);
         }
         if ((result.rowCount ?? 0) === 0) {
             throw new common_1.BadRequestException("Workspace nao encontrado.");

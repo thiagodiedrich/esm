@@ -161,18 +161,18 @@ let AuthController = AuthController_1 = class AuthController {
     }
     async login(body, request) {
         const tenant = await this.tenantService.resolveTenantOrFail(request);
-        const user = await this.authService.validateUserCredentials(tenant.id, body.email, body.password);
+        const user = await this.authService.validateUserCredentials(tenant.uuid, body.email, body.password);
         if (!user) {
             throw new common_1.UnauthorizedException("Credenciais invalidas.");
         }
-        const context = await this.contextService.resolveLoginContext(tenant.id, user.id);
+        const context = await this.contextService.resolveLoginContext(tenant.uuid, user.uuid);
         if (!context) {
             throw new common_1.UnauthorizedException("Contexto invalido para login.");
         }
-        const displayNames = await this.authService.getLoginDisplayNames(tenant.id, user.id, context.organizationId, context.workspaceId);
+        const displayNames = await this.authService.getLoginDisplayNames(tenant.uuid, user.uuid, context.organizationId, context.workspaceId);
         const tokens = await this.authService.issueTokens({
-            userId: user.id,
-            tenantId: tenant.id,
+            userId: user.uuid,
+            tenantId: tenant.uuid,
             organizationId: context.organizationId,
             workspaceId: context.workspaceId,
             tenantSlug: displayNames.tenantSlug,

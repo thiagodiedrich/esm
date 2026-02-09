@@ -15,30 +15,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthContextService = void 0;
 const common_1 = require("@nestjs/common");
 const pg_1 = require("pg");
-const crypto_1 = require("crypto");
 const database_module_1 = require("../database/database.module");
 let AuthContextService = class AuthContextService {
     constructor(pool) {
         this.pool = pool;
     }
-    async resolveLoginContext(tenantId, userId) {
-        const lastContext = await this.getUserLastContext(userId);
-        if (lastContext?.organization_id) {
-            const settings = await this.getOrganizationSettings(lastContext.organization_id);
+    async resolveLoginContext(tenantUuid, userUuid) {
+        const lastContext = await this.getUserLastContext(userUuid);
+        if (lastContext?.organization_uuid) {
+            const settings = await this.getOrganizationSettings(lastContext.organization_uuid);
             if (settings?.remember_last_context) {
-                await this.ensureWorkspaceRequirement(lastContext.organization_id, lastContext.workspace_id);
+                await this.ensureWorkspaceRequirement(lastContext.organization_uuid, lastContext.workspace_uuid);
                 return {
-                    organizationId: lastContext.organization_id,
-                    workspaceId: lastContext.workspace_id
+                    organizationId: lastContext.organization_uuid,
+                    workspaceId: lastContext.workspace_uuid
                 };
             }
         }
-        const defaultOrgId = await this.getDefaultOrganization(tenantId);
-        if (!defaultOrgId) {
+        const defaultOrgUuid = await this.getDefaultOrganization(tenantUuid);
+        if (!defaultOrgUuid) {
             throw new common_1.BadRequestException("Organizacao padrao nao configurada.");
         }
-        await this.ensureWorkspaceRequirement(defaultOrgId, null);
-        return { organizationId: defaultOrgId, workspaceId: null };
+        await this.ensureWorkspaceRequirement(defaultOrgUuid, null);
+        return { organizationId: defaultOrgUuid, workspaceId: null };
     }
     async switchContext(params) {
         const belongs = await this.organizationBelongsToTenant(params.organizationId, params.tenantId);
@@ -58,42 +57,70 @@ let AuthContextService = class AuthContextService {
         }
         return { organizationId: params.organizationId, workspaceId: params.workspaceId };
     }
-    async getUserLastContext(userId) {
-        const result = await this.pool.query("SELECT organization_id, workspace_id FROM res_user_last_context WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1", [userId]);
+    async getUserLastContext(userUuid) {
+        const result = await this.pool.query(`SELECT o.uuid AS organization_uuid, w.uuid AS workspace_uuid
+       FROM res_user_last_context uc
+       JOIN res_users u ON u.id = uc.user_id
+       LEFT JOIN res_organizations o ON o.id = uc.organization_id
+       LEFT JOIN res_workspaces w ON w.id = uc.workspace_id
+       WHERE u.uuid = $1
+       ORDER BY uc.updated_at DESC LIMIT 1`, [userUuid]);
         return (result.rowCount ?? 0) > 0 ? result.rows[0] : null;
     }
-    async getOrganizationSettings(organizationId) {
-        if (!organizationId) {
+    async getOrganizationSettings(organizationUuid) {
+        if (!organizationUuid) {
             return null;
         }
-        const result = await this.pool.query("SELECT workspace_mode, remember_last_context FROM res_organization_settings WHERE organization_id = $1", [organizationId]);
+        const result = await this.pool.query(`SELECT s.workspace_mode, s.remember_last_context
+       FROM res_organization_settings s
+       JOIN res_organizations o ON o.id = s.organization_id
+       WHERE o.uuid = $1`, [organizationUuid]);
         return (result.rowCount ?? 0) > 0 ? result.rows[0] : null;
     }
-    async getDefaultOrganization(tenantId) {
-        const result = await this.pool.query("SELECT id FROM res_organizations WHERE tenant_id = $1 AND is_default = true LIMIT 1", [tenantId]);
-        return (result.rowCount ?? 0) > 0 ? result.rows[0].id : null;
+    async getDefaultOrganization(tenantUuid) {
+        const result = await this.pool.query(`SELECT o.uuid FROM res_organizations o
+       JOIN tenants t ON t.id = o.tenant_id
+       WHERE t.uuid = $1 AND o.is_default = true LIMIT 1`, [tenantUuid]);
+        return (result.rowCount ?? 0) > 0 ? result.rows[0].uuid : null;
     }
-    async ensureWorkspaceRequirement(organizationId, workspaceId) {
-        const settings = await this.getOrganizationSettings(organizationId);
-        if (settings?.workspace_mode === "required" && !workspaceId) {
+    async ensureWorkspaceRequirement(organizationUuid, workspaceUuid) {
+        const settings = await this.getOrganizationSettings(organizationUuid);
+        if (settings?.workspace_mode === "required" && !workspaceUuid) {
             throw new common_1.BadRequestException("Workspace obrigatorio para esta organizacao.");
         }
     }
-    async organizationBelongsToTenant(organizationId, tenantId) {
-        const result = await this.pool.query("SELECT 1 FROM res_organizations WHERE id = $1 AND tenant_id = $2", [organizationId, tenantId]);
+    async organizationBelongsToTenant(organizationUuid, tenantUuid) {
+        const result = await this.pool.query(`SELECT 1 FROM res_organizations o
+       JOIN tenants t ON t.id = o.tenant_id
+       WHERE o.uuid = $1 AND t.uuid = $2`, [organizationUuid, tenantUuid]);
         return (result.rowCount ?? 0) > 0;
     }
-    async workspaceBelongsToOrganization(workspaceId, organizationId) {
-        const result = await this.pool.query("SELECT 1 FROM res_workspaces WHERE id = $1 AND organization_id = $2", [workspaceId, organizationId]);
+    async workspaceBelongsToOrganization(workspaceUuid, organizationUuid) {
+        const result = await this.pool.query(`SELECT 1 FROM res_workspaces w
+       JOIN res_organizations o ON o.id = w.organization_id
+       WHERE w.uuid = $1 AND o.uuid = $2`, [workspaceUuid, organizationUuid]);
         return (result.rowCount ?? 0) > 0;
     }
-    async saveUserLastContext(userId, organizationId, workspaceId) {
+    async saveUserLastContext(userUuid, organizationUuid, workspaceUuid) {
+        const userIdRes = await this.pool.query("SELECT id FROM res_users WHERE uuid = $1", [userUuid]);
+        const userId = userIdRes.rows[0]?.id;
+        if (!userId)
+            return;
+        const orgIdRes = await this.pool.query("SELECT id FROM res_organizations WHERE uuid = $1", [organizationUuid]);
+        const organizationId = orgIdRes.rows[0]?.id;
+        if (!organizationId)
+            return;
+        let workspaceId = null;
+        if (workspaceUuid) {
+            const wsIdRes = await this.pool.query("SELECT id FROM res_workspaces WHERE uuid = $1", [workspaceUuid]);
+            workspaceId = wsIdRes.rows[0]?.id ?? null;
+        }
         const existing = await this.pool.query("SELECT id FROM res_user_last_context WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1", [userId]);
         if (existing.rowCount) {
             await this.pool.query("UPDATE res_user_last_context SET organization_id = $1, workspace_id = $2, updated_at = now() WHERE id = $3", [organizationId, workspaceId, existing.rows[0].id]);
             return;
         }
-        await this.pool.query("INSERT INTO res_user_last_context (id, user_id, organization_id, workspace_id, updated_at) VALUES ($1, $2, $3, $4, now())", [(0, crypto_1.randomUUID)(), userId, organizationId, workspaceId]);
+        await this.pool.query("INSERT INTO res_user_last_context (user_id, organization_id, workspace_id, updated_at) VALUES ($1, $2, $3, now())", [userId, organizationId, workspaceId]);
     }
 };
 exports.AuthContextService = AuthContextService;

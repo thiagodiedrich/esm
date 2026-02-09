@@ -49,7 +49,7 @@ __decorate([
 __decorate([
     (0, swagger_1.ApiProperty)({ required: false, description: "UUID do tenant (opcional; usado para alinhar com TENANT_MASTER_ADMIN_TENANT_ID)" }),
     __metadata("design:type", Object)
-], TenantRequestDto.prototype, "id", void 0);
+], TenantRequestDto.prototype, "uuid", void 0);
 __decorate([
     (0, swagger_1.ApiProperty)({ required: false, description: "Nome da primeira organização (cria org + partner + primeiro usuário)" }),
     __metadata("design:type", Object)

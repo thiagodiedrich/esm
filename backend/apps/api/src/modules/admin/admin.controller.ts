@@ -26,7 +26,7 @@ class TenantRequestDto {
   migration_status?: string | null;
 
   @ApiProperty({ required: false, description: "UUID do tenant (opcional; usado para alinhar com TENANT_MASTER_ADMIN_TENANT_ID)" })
-  id?: string | null;
+  uuid?: string | null;
 
   @ApiProperty({ required: false, description: "Nome da primeira organização (cria org + partner + primeiro usuário)" })
   first_organization_name?: string | null;

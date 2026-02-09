@@ -8,7 +8,8 @@ import {
   BadRequestException,
   Logger,
   HttpCode,
-  HttpStatus
+  HttpStatus,
+  UseGuards
 } from "@nestjs/common";
 import {
   ApiBody,
@@ -22,6 +23,7 @@ import { Public } from "./auth.decorators";
 import { AuthService } from "./auth.service";
 import { AuthTenantService } from "./auth.tenant.service";
 import { AuthContextService } from "../context/context.service";
+import { LoginRateLimitGuard } from "./login-rate-limit.guard";
 import { FastifyRequest } from "fastify";
 
 class LoginRequestDto {
@@ -136,13 +138,14 @@ export class AuthController {
 
   @Public()
   @Post("/login")
+  @UseGuards(LoginRateLimitGuard)
   @ApiOperation({ summary: "Login de usuario" })
   @ApiBody({ type: LoginRequestDto })
   @ApiOkResponse({ type: TokenResponseDto })
   async login(@Body() body: LoginRequest, @Req() request: FastifyRequest) {
     const tenant = await this.tenantService.resolveTenantOrFail(request);
     const user = await this.authService.validateUserCredentials(
-      tenant.id,
+      tenant.uuid,
       body.email,
       body.password
     );
@@ -151,21 +154,21 @@ export class AuthController {
       throw new UnauthorizedException("Credenciais invalidas.");
     }
 
-    const context = await this.contextService.resolveLoginContext(tenant.id, user.id);
+    const context = await this.contextService.resolveLoginContext(tenant.uuid, user.uuid);
 
     if (!context) {
       throw new UnauthorizedException("Contexto invalido para login.");
     }
 
     const displayNames = await this.authService.getLoginDisplayNames(
-      tenant.id,
-      user.id,
+      tenant.uuid,
+      user.uuid,
       context.organizationId,
       context.workspaceId
     );
     const tokens = await this.authService.issueTokens({
-      userId: user.id,
-      tenantId: tenant.id,
+      userId: user.uuid,
+      tenantId: tenant.uuid,
       organizationId: context.organizationId,
       workspaceId: context.workspaceId,
       tenantSlug: displayNames.tenantSlug,

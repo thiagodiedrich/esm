@@ -1,22 +1,14 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Pool } from "pg";
-import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { PG_POOL } from "../database/database.module";
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function parseUuid(value?: string | null): string | null {
-  if (!value?.trim()) return null;
-  return UUID_REGEX.test(value.trim()) ? value.trim() : null;
-}
+import { resolveUuidToId } from "../database/uuid-resolver";
 
 interface TenantInput {
   name: string;
   slug: string;
-  id?: string | null;
+  uuid?: string | null;
   db_strategy?: string | null;
   control_plane_db?: string | null;
   erp_db?: string | null;
@@ -74,15 +66,9 @@ export class AdminService {
       throw new BadRequestException("Slug do tenant ja existe.");
     }
 
-    const tenantId =
-      parseUuid(input.id) ?? randomUUID();
     const countBefore = await this.pool.query("SELECT COUNT(*)::int AS c FROM tenants", []);
     const isFirstTenant = (countBefore.rows[0]?.c ?? 0) === 0;
-    const masterTenantIdFromEnv = parseUuid(
-      this.configService.get<string>("TENANT_MASTER_ADMIN_TENANT_ID") ?? null
-    );
-    const isSuperTenant =
-      isFirstTenant || (!!masterTenantIdFromEnv && tenantId === masterTenantIdFromEnv);
+    const masterTenantUuidFromEnv = this.configService.get<string>("TENANT_MASTER_ADMIN_TENANT_ID")?.trim() ?? null;
 
     const createFirstOrgAndUser =
       !!input.first_organization_name?.trim() &&
@@ -94,12 +80,12 @@ export class AdminService {
       await this.pool.query("BEGIN");
       transactionOpen = true;
 
-      await this.pool.query(
+      const tenantResult = await this.pool.query<{ id: number; uuid: string; is_super_tenant: boolean }>(
         `INSERT INTO tenants
-         (id, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())`,
+         (name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+         RETURNING id, uuid, is_super_tenant`,
         [
-          tenantId,
           input.name,
           input.slug,
           input.db_strategy ?? null,
@@ -107,78 +93,85 @@ export class AdminService {
           input.erp_db ?? null,
           input.telemetry_db ?? null,
           input.migration_status ?? null,
-          isSuperTenant
+          isFirstTenant || (!!masterTenantUuidFromEnv && input.uuid === masterTenantUuidFromEnv)
         ]
       );
+      const tenantRow = tenantResult.rows[0];
+      const tenantId = tenantRow.id;
+      const tenantUuid = tenantRow.uuid;
+
+      const isSuperTenant = tenantRow.is_super_tenant ?? false;
 
       let organization: Record<string, unknown> | null = null;
       let user: Record<string, unknown> | null = null;
 
       if (createFirstOrgAndUser) {
-        const orgId = randomUUID();
-        await this.pool.query(
-          `INSERT INTO res_organizations (id, tenant_id, partner_id, name, is_default, created_at, updated_at)
-           VALUES ($1, $2, NULL, $3, TRUE, now(), now())`,
-          [orgId, tenantId, input.first_organization_name!.trim()]
+        const orgResult = await this.pool.query<{ id: number; uuid: string }>(
+          `INSERT INTO res_organizations (tenant_id, partner_id, name, is_default, created_at, updated_at)
+           VALUES ($1, NULL, $2, TRUE, now(), now())
+           RETURNING id, uuid`,
+          [tenantId, input.first_organization_name!.trim()]
         );
-        organization = {
-          id: orgId,
-          tenant_id: tenantId,
-          name: input.first_organization_name!.trim(),
-          is_default: true
-        };
+        const orgRow = orgResult.rows[0];
+        const orgId = orgRow.id;
+        const orgUuid = orgRow.uuid;
 
-        const partnerId = randomUUID();
         const partnerName =
           (input.first_user_name ?? input.first_organization_name ?? input.first_user_email)!.trim();
         const userEmail = input.first_user_email!.trim();
-        await this.pool.query(
-          `INSERT INTO res_partners (id, tenant_id, organization_id, name, email, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, now(), now())`,
-          [partnerId, tenantId, orgId, partnerName, userEmail]
+        const partnerResult = await this.pool.query<{ id: number; uuid: string }>(
+          `INSERT INTO res_partners (tenant_id, organization_id, name, email, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, now(), now())
+           RETURNING id, uuid`,
+          [tenantId, orgId, partnerName, userEmail]
         );
+        const partnerRow = partnerResult.rows[0];
+        const partnerId = partnerRow.id;
+
         await this.pool.query(
           "UPDATE res_organizations SET partner_id = $2, updated_at = now() WHERE id = $1 AND tenant_id = $3",
           [orgId, partnerId, tenantId]
         );
 
-        const userId = randomUUID();
         const passwordHash = await bcrypt.hash(input.first_user_password!, 12);
-        await this.pool.query(
+        const userResult = await this.pool.query<{ id: number; uuid: string }>(
           `INSERT INTO res_users
-           (id, tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, $8, now(), now())`,
-          [
-            userId,
-            tenantId,
-            partnerId,
-            userEmail,
-            passwordHash,
-            isSuperTenant,
-            isSuperTenant,
-            orgId
-          ]
+           (tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, TRUE, $5, $6, $7, now(), now())
+           RETURNING id, uuid`,
+          [tenantId, partnerId, userEmail, passwordHash, isSuperTenant, isSuperTenant, orgId]
         );
+        const userRow = userResult.rows[0];
+
+        organization = {
+          id: orgRow.id,
+          uuid: orgUuid,
+          tenant_id: tenantUuid,
+          name: input.first_organization_name!.trim(),
+          is_default: true
+        };
+
         user = {
-          id: userId,
-          tenant_id: tenantId,
-          partner_id: partnerId,
+          id: userRow.id,
+          uuid: userRow.uuid,
+          tenant_id: tenantUuid,
+          partner_id: partnerRow.uuid,
           email: userEmail,
           is_super_tenant: isSuperTenant,
           is_super_admin: isSuperTenant,
-          organization_id: orgId
+          organization_id: orgUuid
         };
       }
 
       await this.pool.query("COMMIT");
       transactionOpen = false;
 
-      const tenantRow = await this.pool.query(
-        `SELECT id, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
-         FROM tenants WHERE id = $1`,
-        [tenantId]
+      const tenantSel = await this.pool.query(
+        `SELECT id, uuid, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
+         FROM tenants WHERE uuid = $1`,
+        [tenantUuid]
       );
-      const tenant = tenantRow.rows[0];
+      const tenant = tenantSel.rows[0];
       return organization ? { ...tenant, organization, user } : tenant;
     } catch (e) {
       if (transactionOpen) await this.pool.query("ROLLBACK");
@@ -188,18 +181,18 @@ export class AdminService {
 
   async listTenants() {
     const result = await this.pool.query(
-      `SELECT id, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
+      `SELECT id, uuid, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
        FROM tenants
        ORDER BY created_at DESC`
     );
     return result.rows;
   }
 
-  async getTenant(id: string) {
+  async getTenant(uuid: string) {
     const result = await this.pool.query(
-      `SELECT id, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
-       FROM tenants WHERE id = $1`,
-      [id]
+      `SELECT id, uuid, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
+       FROM tenants WHERE uuid = $1`,
+      [uuid]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Code 8: Tenant nao encontrado");
@@ -207,7 +200,7 @@ export class AdminService {
     return result.rows[0];
   }
 
-  async updateTenant(id: string, input: TenantInput) {
+  async updateTenant(uuid: string, input: TenantInput) {
     const result = await this.pool.query(
       `UPDATE tenants
        SET name = $2,
@@ -218,10 +211,10 @@ export class AdminService {
            telemetry_db = $7,
            migration_status = $8,
            updated_at = now()
-       WHERE id = $1
-       RETURNING id, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at`,
+       WHERE uuid = $1
+       RETURNING id, uuid, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at`,
       [
-        id,
+        uuid,
         input.name,
         input.slug,
         input.db_strategy ?? null,
@@ -237,13 +230,13 @@ export class AdminService {
     return result.rows[0];
   }
 
-  async updateTenantStatus(id: string, status: string) {
+  async updateTenantStatus(uuid: string, status: string) {
     const result = await this.pool.query(
       `UPDATE tenants
        SET migration_status = $2, updated_at = now()
-       WHERE id = $1
-       RETURNING id, name, slug, migration_status, updated_at`,
-      [id, status]
+       WHERE uuid = $1
+       RETURNING id, uuid, name, slug, migration_status, updated_at`,
+      [uuid, status]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Code65: Tenant nao encontrado");
@@ -252,29 +245,27 @@ export class AdminService {
   }
 
   async createPlan(input: PlanInput) {
-    const id = randomUUID();
     const result = await this.pool.query(
-      `INSERT INTO platform_plans (id, code, name, description, created_at)
-       VALUES ($1, $2, $3, $4, now())
-       RETURNING id, code, name, description, created_at`,
-      [id, input.code, input.name, input.description ?? null]
+      `INSERT INTO platform_plans (code, name, description, created_at)
+       VALUES ($1, $2, $3, now())
+       RETURNING id, uuid, code, name, description, created_at`,
+      [input.code, input.name, input.description ?? null]
     );
     return result.rows[0];
   }
 
   async listPlans() {
     const result = await this.pool.query(
-      "SELECT id, code, name, description, created_at FROM platform_plans ORDER BY created_at DESC"
+      "SELECT id, uuid, code, name, description, created_at FROM platform_plans ORDER BY created_at DESC"
     );
     return result.rows;
   }
 
   async updatePlan(code: string, input: PlanInput) {
     const result = await this.pool.query(
-      `UPDATE platform_plans
-       SET name = $2, description = $3
+      `UPDATE platform_plans SET name = $2, description = $3
        WHERE code = $1
-       RETURNING id, code, name, description, created_at`,
+       RETURNING id, uuid, code, name, description, created_at`,
       [code, input.name, input.description ?? null]
     );
     if (result.rowCount === 0) {
@@ -302,34 +293,33 @@ export class AdminService {
     }
     payload.status = status;
     const updated = await this.pool.query(
-      "UPDATE platform_plans SET description = $2 WHERE code = $1 RETURNING id, code, name, description, created_at",
+      "UPDATE platform_plans SET description = $2 WHERE code = $1 RETURNING id, uuid, code, name, description, created_at",
       [code, JSON.stringify(payload)]
     );
     return updated.rows[0];
   }
 
   async createPlatformProduct(input: PlatformProductInput) {
-    const id = randomUUID();
     const result = await this.pool.query(
-      `INSERT INTO platform_products (id, code, name, description, created_at)
-       VALUES ($1, $2, $3, $4, now())
-       RETURNING id, code, name, description, created_at`,
-      [id, input.code, input.name, input.description ?? null]
+      `INSERT INTO platform_products (code, name, description, created_at)
+       VALUES ($1, $2, $3, now())
+       RETURNING id, uuid, code, name, description, created_at`,
+      [input.code, input.name, input.description ?? null]
     );
     return result.rows[0];
   }
 
   async listPlatformProducts() {
     const result = await this.pool.query(
-      "SELECT id, code, name, description, created_at FROM platform_products ORDER BY created_at DESC"
+      "SELECT id, uuid, code, name, description, created_at FROM platform_products ORDER BY created_at DESC"
     );
     return result.rows;
   }
 
-  async getPlatformProduct(id: string) {
+  async getPlatformProduct(uuid: string) {
     const result = await this.pool.query(
-      "SELECT id, code, name, description, created_at FROM platform_products WHERE id = $1",
-      [id]
+      "SELECT id, uuid, code, name, description, created_at FROM platform_products WHERE uuid = $1",
+      [uuid]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Produto nao encontrado.");
@@ -337,11 +327,11 @@ export class AdminService {
     return result.rows[0];
   }
 
-  async updatePlatformProduct(id: string, input: PlatformProductInput) {
+  async updatePlatformProduct(uuid: string, input: PlatformProductInput) {
     const result = await this.pool.query(
       `UPDATE platform_products SET code = $2, name = $3, description = $4
-       WHERE id = $1 RETURNING id, code, name, description, created_at`,
-      [id, input.code, input.name, input.description ?? null]
+       WHERE uuid = $1 RETURNING id, uuid, code, name, description, created_at`,
+      [uuid, input.code, input.name, input.description ?? null]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Produto nao encontrado.");
@@ -349,8 +339,8 @@ export class AdminService {
     return result.rows[0];
   }
 
-  async deletePlatformProduct(id: string) {
-    const result = await this.pool.query("DELETE FROM platform_products WHERE id = $1", [id]);
+  async deletePlatformProduct(uuid: string) {
+    const result = await this.pool.query("DELETE FROM platform_products WHERE uuid = $1", [uuid]);
     if (result.rowCount === 0) {
       throw new NotFoundException("Produto nao encontrado.");
     }
@@ -358,110 +348,203 @@ export class AdminService {
   }
 
   async createPlatformProductModule(input: PlatformProductModuleInput) {
-    const id = randomUUID();
+    const productId = await resolveUuidToId(this.pool, "platform_products", input.product_id);
+    if (!productId) {
+      throw new BadRequestException("Produto nao encontrado.");
+    }
     const result = await this.pool.query(
-      `INSERT INTO platform_product_modules (id, product_id, code, name, created_at)
-       VALUES ($1, $2, $3, $4, now())
-       RETURNING id, product_id, code, name, created_at`,
-      [id, input.product_id, input.code, input.name]
+      `INSERT INTO platform_product_modules (product_id, code, name, created_at)
+       VALUES ($1, $2, $3, now())
+       RETURNING id, uuid, product_id, code, name, created_at`,
+      [productId, input.code, input.name]
     );
-    return result.rows[0];
+    const row = result.rows[0];
+    const productUuidRes = await this.pool.query<{ uuid: string }>(
+      "SELECT uuid FROM platform_products WHERE id = $1",
+      [row.product_id]
+    );
+    return { ...row, product_uuid: productUuidRes.rows[0]?.uuid };
   }
 
-  async listPlatformProductModules(productId?: string) {
-    if (productId) {
+  async listPlatformProductModules(productUuid?: string) {
+    if (productUuid) {
+      const productId = await resolveUuidToId(this.pool, "platform_products", productUuid);
+      if (!productId) return [];
       const result = await this.pool.query(
-        `SELECT id, product_id, code, name, created_at FROM platform_product_modules WHERE product_id = $1 ORDER BY created_at DESC`,
+        `SELECT m.id, m.uuid, m.product_id, m.code, m.name, m.created_at, p.uuid AS product_uuid
+         FROM platform_product_modules m
+         JOIN platform_products p ON p.id = m.product_id
+         WHERE m.product_id = $1 ORDER BY m.created_at DESC`,
         [productId]
       );
-      return result.rows;
+      return result.rows.map((r) => ({ ...r, product_id: r.product_uuid }));
     }
     const result = await this.pool.query(
-      "SELECT id, product_id, code, name, created_at FROM platform_product_modules ORDER BY created_at DESC"
+      `SELECT m.id, m.uuid, m.product_id, m.code, m.name, m.created_at, p.uuid AS product_uuid
+       FROM platform_product_modules m
+       JOIN platform_products p ON p.id = m.product_id
+       ORDER BY m.created_at DESC`
     );
-    return result.rows;
+    return result.rows.map((r) => ({ ...r, product_id: r.product_uuid }));
   }
 
-  async getPlatformProductModule(id: string) {
+  async getPlatformProductModule(uuid: string) {
     const result = await this.pool.query(
-      "SELECT id, product_id, code, name, created_at FROM platform_product_modules WHERE id = $1",
-      [id]
-    );
-    if (result.rowCount === 0) {
-      throw new NotFoundException("Modulo nao encontrado.");
-    }
-    return result.rows[0];
-  }
-
-  async updatePlatformProductModule(id: string, input: PlatformProductModuleInput) {
-    const result = await this.pool.query(
-      `UPDATE platform_product_modules SET product_id = $2, code = $3, name = $4 WHERE id = $1
-       RETURNING id, product_id, code, name, created_at`,
-      [id, input.product_id, input.code, input.name]
+      `SELECT m.id, m.uuid, m.product_id, m.code, m.name, m.created_at, p.uuid AS product_uuid
+       FROM platform_product_modules m
+       JOIN platform_products p ON p.id = m.product_id
+       WHERE m.uuid = $1`,
+      [uuid]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Modulo nao encontrado.");
     }
-    return result.rows[0];
+    const row = result.rows[0];
+    return { ...row, product_id: row.product_uuid };
   }
 
-  async deletePlatformProductModule(id: string) {
-    const result = await this.pool.query("DELETE FROM platform_product_modules WHERE id = $1", [id]);
+  async updatePlatformProductModule(uuid: string, input: PlatformProductModuleInput) {
+    const productId = await resolveUuidToId(this.pool, "platform_products", input.product_id);
+    if (!productId) {
+      throw new BadRequestException("Produto nao encontrado.");
+    }
+    const result = await this.pool.query(
+      `UPDATE platform_product_modules SET product_id = $2, code = $3, name = $4 WHERE uuid = $1
+       RETURNING id, uuid, product_id, code, name, created_at`,
+      [uuid, productId, input.code, input.name]
+    );
+    if (result.rowCount === 0) {
+      throw new NotFoundException("Modulo nao encontrado.");
+    }
+    const row = result.rows[0];
+    const productUuidRes = await this.pool.query<{ uuid: string }>(
+      "SELECT uuid FROM platform_products WHERE id = $1",
+      [row.product_id]
+    );
+    return { ...row, product_id: productUuidRes.rows[0]?.uuid };
+  }
+
+  async deletePlatformProductModule(uuid: string) {
+    const result = await this.pool.query("DELETE FROM platform_product_modules WHERE uuid = $1", [uuid]);
     if (result.rowCount === 0) {
       throw new NotFoundException("Modulo nao encontrado.");
     }
     return { status: "ok" };
   }
 
-  async createTenantPlatformProduct(tenantId: string, input: TenantPlatformProductInput) {
-    const id = randomUUID();
+  async createTenantPlatformProduct(tenantUuid: string, input: TenantPlatformProductInput) {
+    const tenantId = await resolveUuidToId(this.pool, "tenants", tenantUuid);
+    const productId = await resolveUuidToId(this.pool, "platform_products", input.product_id);
+    const planId = await resolveUuidToId(this.pool, "platform_plans", input.plan_id);
+    if (!tenantId || !productId || !planId) {
+      throw new BadRequestException("Tenant, produto ou plano nao encontrado.");
+    }
     const result = await this.pool.query(
-      `INSERT INTO tenant_platform_products (id, tenant_id, product_id, plan_id, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, now())
-       RETURNING id, tenant_id, product_id, plan_id, is_active, created_at`,
-      [id, tenantId, input.product_id, input.plan_id, input.is_active ?? true]
+      `INSERT INTO tenant_platform_products (tenant_id, product_id, plan_id, is_active, created_at)
+       VALUES ($1, $2, $3, $4, now())
+       RETURNING id, uuid, tenant_id, product_id, plan_id, is_active, created_at`,
+      [tenantId, productId, planId, input.is_active ?? true]
     );
-    return result.rows[0];
+    const row = result.rows[0];
+    const [tenantRes, productRes, planRes] = await Promise.all([
+      this.pool.query<{ uuid: string }>("SELECT uuid FROM tenants WHERE id = $1", [row.tenant_id]),
+      this.pool.query<{ uuid: string }>("SELECT uuid FROM platform_products WHERE id = $1", [row.product_id]),
+      this.pool.query<{ uuid: string }>("SELECT uuid FROM platform_plans WHERE id = $1", [row.plan_id])
+    ]);
+    return {
+      ...row,
+      tenant_id: tenantRes.rows[0]?.uuid,
+      product_id: productRes.rows[0]?.uuid,
+      plan_id: planRes.rows[0]?.uuid
+    };
   }
 
-  async listTenantPlatformProducts(tenantId: string) {
+  async listTenantPlatformProducts(tenantUuid: string) {
+    const tenantId = await resolveUuidToId(this.pool, "tenants", tenantUuid);
+    if (!tenantId) return [];
     const result = await this.pool.query(
-      `SELECT id, tenant_id, product_id, plan_id, is_active, created_at
-       FROM tenant_platform_products WHERE tenant_id = $1 ORDER BY created_at DESC`,
+      `SELECT tpp.id, tpp.uuid, tpp.tenant_id, tpp.product_id, tpp.plan_id, tpp.is_active, tpp.created_at,
+              t.uuid AS tenant_uuid, pp.uuid AS product_uuid, pl.uuid AS plan_uuid
+       FROM tenant_platform_products tpp
+       JOIN tenants t ON t.id = tpp.tenant_id
+       JOIN platform_products pp ON pp.id = tpp.product_id
+       JOIN platform_plans pl ON pl.id = tpp.plan_id
+       WHERE tpp.tenant_id = $1 ORDER BY tpp.created_at DESC`,
       [tenantId]
     );
-    return result.rows;
+    return result.rows.map((r) => ({
+      ...r,
+      tenant_id: r.tenant_uuid,
+      product_id: r.product_uuid,
+      plan_id: r.plan_uuid
+    }));
   }
 
-  async getTenantPlatformProduct(tenantId: string, id: string) {
+  async getTenantPlatformProduct(tenantUuid: string, uuid: string) {
+    const tenantId = await resolveUuidToId(this.pool, "tenants", tenantUuid);
+    if (!tenantId) {
+      throw new NotFoundException("Tenant nao encontrado.");
+    }
     const result = await this.pool.query(
-      `SELECT id, tenant_id, product_id, plan_id, is_active, created_at
-       FROM tenant_platform_products WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId]
+      `SELECT tpp.id, tpp.uuid, tpp.tenant_id, tpp.product_id, tpp.plan_id, tpp.is_active, tpp.created_at,
+              t.uuid AS tenant_uuid, pp.uuid AS product_uuid, pl.uuid AS plan_uuid
+       FROM tenant_platform_products tpp
+       JOIN tenants t ON t.id = tpp.tenant_id
+       JOIN platform_products pp ON pp.id = tpp.product_id
+       JOIN platform_plans pl ON pl.id = tpp.plan_id
+       WHERE tpp.uuid = $1 AND tpp.tenant_id = $2`,
+      [uuid, tenantId]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Produto do tenant nao encontrado.");
     }
-    return result.rows[0];
+    const row = result.rows[0];
+    return {
+      ...row,
+      tenant_id: row.tenant_uuid,
+      product_id: row.product_uuid,
+      plan_id: row.plan_uuid
+    };
   }
 
-  async updateTenantPlatformProduct(tenantId: string, id: string, input: TenantPlatformProductInput) {
+  async updateTenantPlatformProduct(tenantUuid: string, uuid: string, input: TenantPlatformProductInput) {
+    const tenantId = await resolveUuidToId(this.pool, "tenants", tenantUuid);
+    const productId = await resolveUuidToId(this.pool, "platform_products", input.product_id);
+    const planId = await resolveUuidToId(this.pool, "platform_plans", input.plan_id);
+    if (!tenantId || !productId || !planId) {
+      throw new BadRequestException("Tenant, produto ou plano nao encontrado.");
+    }
     const result = await this.pool.query(
       `UPDATE tenant_platform_products SET product_id = $3, plan_id = $4, is_active = $5
-       WHERE id = $1 AND tenant_id = $2
-       RETURNING id, tenant_id, product_id, plan_id, is_active, created_at`,
-      [id, tenantId, input.product_id, input.plan_id, input.is_active ?? true]
+       WHERE uuid = $1 AND tenant_id = $2
+       RETURNING id, uuid, tenant_id, product_id, plan_id, is_active, created_at`,
+      [uuid, tenantId, productId, planId, input.is_active ?? true]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Produto do tenant nao encontrado.");
     }
-    return result.rows[0];
+    const row = result.rows[0];
+    const [tenantRes, productRes, planRes] = await Promise.all([
+      this.pool.query<{ uuid: string }>("SELECT uuid FROM tenants WHERE id = $1", [row.tenant_id]),
+      this.pool.query<{ uuid: string }>("SELECT uuid FROM platform_products WHERE id = $1", [row.product_id]),
+      this.pool.query<{ uuid: string }>("SELECT uuid FROM platform_plans WHERE id = $1", [row.plan_id])
+    ]);
+    return {
+      ...row,
+      tenant_id: tenantRes.rows[0]?.uuid,
+      product_id: productRes.rows[0]?.uuid,
+      plan_id: planRes.rows[0]?.uuid
+    };
   }
 
-  async deleteTenantPlatformProduct(tenantId: string, id: string) {
+  async deleteTenantPlatformProduct(tenantUuid: string, uuid: string) {
+    const tenantId = await resolveUuidToId(this.pool, "tenants", tenantUuid);
+    if (!tenantId) {
+      throw new NotFoundException("Tenant nao encontrado.");
+    }
     const result = await this.pool.query(
-      "DELETE FROM tenant_platform_products WHERE id = $1 AND tenant_id = $2",
-      [id, tenantId]
+      "DELETE FROM tenant_platform_products WHERE uuid = $1 AND tenant_id = $2",
+      [uuid, tenantId]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Produto do tenant nao encontrado.");
@@ -469,37 +552,40 @@ export class AdminService {
     return { status: "ok" };
   }
 
-  async listTenantUsageMetrics(tenantId: string) {
+  async listTenantUsageMetrics(tenantUuid: string) {
+    const tenantId = await resolveUuidToId(this.pool, "tenants", tenantUuid);
+    if (!tenantId) return [];
     const result = await this.pool.query(
-      `SELECT id, tenant_id, metric_key, metric_value, period, source, created_at
-       FROM tenant_usage_metrics WHERE tenant_id = $1 ORDER BY created_at DESC`,
+      `SELECT tum.id, tum.uuid, tum.tenant_id, tum.metric_key, tum.metric_value, tum.period, tum.source, tum.created_at, t.uuid AS tenant_uuid
+       FROM tenant_usage_metrics tum
+       JOIN tenants t ON t.id = tum.tenant_id
+       WHERE tum.tenant_id = $1 ORDER BY tum.created_at DESC`,
       [tenantId]
     );
-    return result.rows;
+    return result.rows.map((r) => ({ ...r, tenant_id: r.tenant_uuid }));
   }
 
   async createPermission(input: PermissionInput) {
-    const id = randomUUID();
     const result = await this.pool.query(
-      `INSERT INTO res_permissions (id, resource, action, description, created_at)
-       VALUES ($1, $2, $3, $4, now())
-       RETURNING id, resource, action, description, created_at`,
-      [id, input.resource, input.action, input.description ?? null]
+      `INSERT INTO res_permissions (resource, action, description, created_at)
+       VALUES ($1, $2, $3, now())
+       RETURNING id, uuid, resource, action, description, created_at`,
+      [input.resource, input.action, input.description ?? null]
     );
     return result.rows[0];
   }
 
   async listPermissions() {
     const result = await this.pool.query(
-      "SELECT id, resource, action, description, created_at FROM res_permissions ORDER BY resource, action"
+      "SELECT id, uuid, resource, action, description, created_at FROM res_permissions ORDER BY resource, action"
     );
     return result.rows;
   }
 
-  async getPermission(id: string) {
+  async getPermission(uuid: string) {
     const result = await this.pool.query(
-      "SELECT id, resource, action, description, created_at FROM res_permissions WHERE id = $1",
-      [id]
+      "SELECT id, uuid, resource, action, description, created_at FROM res_permissions WHERE uuid = $1",
+      [uuid]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Permissao nao encontrada.");
@@ -507,11 +593,11 @@ export class AdminService {
     return result.rows[0];
   }
 
-  async updatePermission(id: string, input: PermissionInput) {
+  async updatePermission(uuid: string, input: PermissionInput) {
     const result = await this.pool.query(
-      `UPDATE res_permissions SET resource = $2, action = $3, description = $4 WHERE id = $1
-       RETURNING id, resource, action, description, created_at`,
-      [id, input.resource, input.action, input.description ?? null]
+      `UPDATE res_permissions SET resource = $2, action = $3, description = $4 WHERE uuid = $1
+       RETURNING id, uuid, resource, action, description, created_at`,
+      [uuid, input.resource, input.action, input.description ?? null]
     );
     if (result.rowCount === 0) {
       throw new NotFoundException("Permissao nao encontrada.");
@@ -519,8 +605,8 @@ export class AdminService {
     return result.rows[0];
   }
 
-  async deletePermission(id: string) {
-    const result = await this.pool.query("DELETE FROM res_permissions WHERE id = $1", [id]);
+  async deletePermission(uuid: string) {
+    const result = await this.pool.query("DELETE FROM res_permissions WHERE uuid = $1", [uuid]);
     if (result.rowCount === 0) {
       throw new NotFoundException("Permissao nao encontrada.");
     }

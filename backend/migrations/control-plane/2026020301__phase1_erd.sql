@@ -1,7 +1,8 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS tenants (
-  id UUID PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
   name VARCHAR,
   slug VARCHAR UNIQUE,
   db_strategy VARCHAR,
@@ -14,9 +15,10 @@ CREATE TABLE IF NOT EXISTS tenants (
 );
 
 CREATE TABLE IF NOT EXISTS res_partners (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
-  organization_id UUID,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
+  organization_id INTEGER,
   name VARCHAR,
   email VARCHAR,
   telephone VARCHAR,
@@ -30,9 +32,10 @@ CREATE TABLE IF NOT EXISTS res_partners (
 );
 
 CREATE TABLE IF NOT EXISTS res_organizations (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
-  partner_id UUID,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
+  partner_id INTEGER,
   name VARCHAR,
   is_default BOOLEAN,
   created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -51,9 +54,10 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 CREATE TABLE IF NOT EXISTS res_users (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
-  partner_id UUID REFERENCES res_partners(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
+  partner_id INTEGER REFERENCES res_partners(id),
   email VARCHAR,
   password_hash VARCHAR,
   is_active BOOLEAN,
@@ -63,17 +67,19 @@ CREATE TABLE IF NOT EXISTS res_users (
 );
 
 CREATE TABLE IF NOT EXISTS res_workspaces (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
-  organization_id UUID REFERENCES res_organizations(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
+  organization_id INTEGER REFERENCES res_organizations(id),
   name VARCHAR,
   created_at TIMESTAMP NOT NULL DEFAULT now(),
   updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS res_roles (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
   name VARCHAR,
   description VARCHAR,
   created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -81,7 +87,8 @@ CREATE TABLE IF NOT EXISTS res_roles (
 );
 
 CREATE TABLE IF NOT EXISTS res_permissions (
-  id UUID PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
   resource VARCHAR,
   action VARCHAR,
   description VARCHAR,
@@ -89,24 +96,27 @@ CREATE TABLE IF NOT EXISTS res_permissions (
 );
 
 CREATE TABLE IF NOT EXISTS res_user_roles (
-  id UUID PRIMARY KEY,
-  user_id UUID REFERENCES res_users(id),
-  role_id UUID REFERENCES res_roles(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  user_id INTEGER REFERENCES res_users(id),
+  role_id INTEGER REFERENCES res_roles(id),
   scope_type VARCHAR,
-  scope_id UUID,
+  scope_id INTEGER,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS res_user_permission_overrides (
-  id UUID PRIMARY KEY,
-  user_id UUID REFERENCES res_users(id),
-  permission_id UUID REFERENCES res_permissions(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  user_id INTEGER REFERENCES res_users(id),
+  permission_id INTEGER REFERENCES res_permissions(id),
   effect VARCHAR,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS platform_products (
-  id UUID PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
   code VARCHAR UNIQUE,
   name VARCHAR,
   description VARCHAR,
@@ -114,15 +124,17 @@ CREATE TABLE IF NOT EXISTS platform_products (
 );
 
 CREATE TABLE IF NOT EXISTS platform_product_modules (
-  id UUID PRIMARY KEY,
-  product_id UUID REFERENCES platform_products(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  product_id INTEGER REFERENCES platform_products(id),
   code VARCHAR,
   name VARCHAR,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS platform_plans (
-  id UUID PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
   code VARCHAR UNIQUE,
   name VARCHAR,
   description VARCHAR,
@@ -130,25 +142,28 @@ CREATE TABLE IF NOT EXISTS platform_plans (
 );
 
 CREATE TABLE IF NOT EXISTS tenant_platform_products (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
-  product_id UUID REFERENCES platform_products(id),
-  plan_id UUID REFERENCES platform_plans(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
+  product_id INTEGER REFERENCES platform_products(id),
+  plan_id INTEGER REFERENCES platform_plans(id),
   is_active BOOLEAN,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS tenant_platform_product_modules (
-  id UUID PRIMARY KEY,
-  tenant_product_id UUID REFERENCES tenant_platform_products(id),
-  product_module_id UUID REFERENCES platform_product_modules(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_product_id INTEGER REFERENCES tenant_platform_products(id),
+  product_module_id INTEGER REFERENCES platform_product_modules(id),
   is_active BOOLEAN,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS res_organization_settings (
-  id UUID PRIMARY KEY,
-  organization_id UUID REFERENCES res_organizations(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  organization_id INTEGER REFERENCES res_organizations(id),
   workspace_mode VARCHAR,
   remember_last_context BOOLEAN,
   menu_cache_ttl INTEGER,
@@ -159,8 +174,9 @@ CREATE TABLE IF NOT EXISTS res_organization_settings (
 );
 
 CREATE TABLE IF NOT EXISTS tenant_usage_metrics (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id),
+  id SERIAL PRIMARY KEY,
+  uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id INTEGER REFERENCES tenants(id),
   metric_key VARCHAR,
   metric_value BIGINT,
   period VARCHAR,

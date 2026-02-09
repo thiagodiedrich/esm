@@ -38,8 +38,10 @@ interface ProductModuleRow {
 }
 
 interface ResMenuRow {
-  id: string;
-  parent_id: string | null;
+  id: number;
+  uuid: string;
+  parent_id: number | null;
+  parent_uuid: string | null;
   label: string;
   icon: string | null;
   route: string | null;
@@ -140,49 +142,52 @@ export class MenuService {
   /** Carrega itens de menu da tabela res_menus (tenant e admin), ordenados por scope e sequence. */
   private async getMenusFromDb(): Promise<ResMenuRow[]> {
     const result = await this.pool.query<ResMenuRow>(
-      `SELECT id, parent_id, label, icon, route, resource, action,
-              product_code, product_module_code, sequence, scope
-       FROM res_menus
-       ORDER BY CASE scope WHEN 'tenant' THEN 0 ELSE 1 END, sequence ASC, label ASC`
+      `SELECT m.id, m.uuid, m.parent_id, p.uuid AS parent_uuid, m.label, m.icon, m.route, m.resource, m.action,
+              m.product_code, m.product_module_code, m.sequence, m.scope
+       FROM res_menus m
+       LEFT JOIN res_menus p ON p.id = m.parent_id
+       ORDER BY CASE m.scope WHEN 'tenant' THEN 0 ELSE 1 END, m.sequence ASC, m.label ASC`
     );
     return result.rows;
   }
 
   /** Carrega overrides de permissão do usuário (allow/deny) para filtrar o menu. */
   private async getUserPermissionOverrides(
-    userId: string
+    userUuid: string
   ): Promise<UserOverrideRow[]> {
     const result = await this.pool.query<UserOverrideRow>(
       `SELECT p.resource, p.action, o.effect
        FROM res_user_permission_overrides o
+       JOIN res_users u ON u.id = o.user_id
        JOIN res_permissions p ON p.id = o.permission_id
-       WHERE o.user_id = $1`,
-      [userId]
+       WHERE u.uuid = $1`,
+      [userUuid]
     );
     return result.rows;
   }
 
   /** Carrega permissões herdadas das roles do usuário (res_user_roles -> res_role_permissions -> res_permissions). */
   private async getUserPermissionsFromRoles(
-    userId: string
+    userUuid: string
   ): Promise<string[]> {
     const result = await this.pool.query<RolePermissionRow>(
       `SELECT DISTINCT p.resource, p.action
        FROM res_user_roles ur
+       JOIN res_users u ON u.id = ur.user_id
        JOIN res_role_permissions rp ON rp.role_id = ur.role_id
        JOIN res_permissions p ON p.id = rp.permission_id
-       WHERE ur.user_id = $1`,
-      [userId]
+       WHERE u.uuid = $1`,
+      [userUuid]
     );
     return result.rows.map((r) => `${r.resource}:${r.action}`);
   }
 
-  /** Monta árvore de menu a partir da lista plana (parent_id). */
+  /** Monta árvore de menu a partir da lista plana (parent_id). Usa uuid como id no MenuItem. */
   private buildMenuTree(rows: ResMenuRow[]): MenuItem[] {
-    const byId = new Map<string, MenuItem>();
+    const byUuid = new Map<string, MenuItem>();
     for (const r of rows) {
-      byId.set(r.id, {
-        id: r.id,
+      byUuid.set(r.uuid, {
+        id: r.uuid,
         label: r.label,
         icon: r.icon,
         route: r.route,
@@ -195,11 +200,11 @@ export class MenuService {
     }
     const roots: MenuItem[] = [];
     for (const r of rows) {
-      const item = byId.get(r.id)!;
-      if (!r.parent_id) {
+      const item = byUuid.get(r.uuid)!;
+      if (!r.parent_uuid) {
         roots.push(item);
       } else {
-        const parent = byId.get(r.parent_id);
+        const parent = byUuid.get(r.parent_uuid);
         if (parent) {
           parent.children.push(item);
         } else {
@@ -207,11 +212,11 @@ export class MenuService {
         }
       }
     }
-    for (const item of byId.values()) {
+    for (const item of byUuid.values()) {
       item.children.sort(
         (a, b) =>
-          rows.findIndex((r) => r.id === a.id) -
-          rows.findIndex((r) => r.id === b.id)
+          rows.findIndex((r) => r.uuid === a.id) -
+          rows.findIndex((r) => r.uuid === b.id)
       );
     }
     return roots;
@@ -356,37 +361,41 @@ export class MenuService {
     return false;
   }
 
-  private async getActiveProducts(tenantId: string): Promise<Set<string>> {
+  private async getActiveProducts(tenantUuid: string): Promise<Set<string>> {
     const result = await this.pool.query<ProductRow>(
       `SELECT pp.code
        FROM tenant_platform_products tpp
+       JOIN tenants t ON t.id = tpp.tenant_id
        JOIN platform_products pp ON pp.id = tpp.product_id
-       WHERE tpp.tenant_id = $1 AND tpp.is_active = true`,
-      [tenantId]
+       WHERE t.uuid = $1 AND tpp.is_active = true`,
+      [tenantUuid]
     );
 
     return new Set(result.rows.map((row) => row.code));
   }
 
-  private async getActiveModules(tenantId: string): Promise<Set<string>> {
+  private async getActiveModules(tenantUuid: string): Promise<Set<string>> {
     const result = await this.pool.query<ProductModuleRow>(
       `SELECT ppm.code
        FROM tenant_platform_product_modules tppm
        JOIN tenant_platform_products tpp ON tpp.id = tppm.tenant_product_id
+       JOIN tenants t ON t.id = tpp.tenant_id
        JOIN platform_product_modules ppm ON ppm.id = tppm.product_module_id
-       WHERE tpp.tenant_id = $1 AND tpp.is_active = true AND tppm.is_active = true`,
-      [tenantId]
+       WHERE t.uuid = $1 AND tpp.is_active = true AND tppm.is_active = true`,
+      [tenantUuid]
     );
 
     return new Set(result.rows.map((row) => row.code));
   }
 
   private async getMenuCacheTtl(
-    organizationId: string
+    organizationUuid: string
   ): Promise<number | null> {
     const result = await this.pool.query<OrganizationSettingsRow>(
-      "SELECT menu_cache_ttl FROM res_organization_settings WHERE organization_id = $1",
-      [organizationId]
+      `SELECT s.menu_cache_ttl FROM res_organization_settings s
+       JOIN res_organizations o ON o.id = s.organization_id
+       WHERE o.uuid = $1`,
+      [organizationUuid]
     );
 
     if ((result.rowCount ?? 0) === 0) {

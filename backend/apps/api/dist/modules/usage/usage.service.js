@@ -15,8 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsageService = void 0;
 const common_1 = require("@nestjs/common");
 const pg_1 = require("pg");
-const crypto_1 = require("crypto");
 const database_module_1 = require("../database/database.module");
+const uuid_resolver_1 = require("../database/uuid-resolver");
 const ALLOWED_METRICS = new Set([
     "api.requests",
     "telemetry.events_ingested",
@@ -32,11 +32,14 @@ let UsageService = class UsageService {
         if (!ALLOWED_METRICS.has(input.metric_key)) {
             throw new common_1.BadRequestException("Metric key nao permitido.");
         }
+        const tenantId = await (0, uuid_resolver_1.resolveUuidToId)(this.pool, "tenants", input.tenant_id);
+        if (!tenantId) {
+            throw new common_1.BadRequestException("Tenant nao encontrado.");
+        }
         await this.pool.query(`INSERT INTO tenant_usage_metrics
-       (id, tenant_id, metric_key, metric_value, period, source, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())`, [
-            (0, crypto_1.randomUUID)(),
-            input.tenant_id,
+       (tenant_id, metric_key, metric_value, period, source, created_at)
+       VALUES ($1, $2, $3, $4, $5, now())`, [
+            tenantId,
             input.metric_key,
             input.metric_value,
             input.period,

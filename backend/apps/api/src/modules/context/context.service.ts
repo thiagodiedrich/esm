@@ -1,6 +1,5 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { Pool } from "pg";
-import { randomUUID } from "crypto";
 import { PG_POOL } from "../database/database.module";
 
 interface OrganizationSettings {
@@ -9,8 +8,8 @@ interface OrganizationSettings {
 }
 
 interface LastContextRow {
-  organization_id: string | null;
-  workspace_id: string | null;
+  organization_uuid: string | null;
+  workspace_uuid: string | null;
 }
 
 interface ResolvedContext {
@@ -22,29 +21,29 @@ interface ResolvedContext {
 export class AuthContextService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
-  async resolveLoginContext(tenantId: string, userId: string): Promise<ResolvedContext> {
-    const lastContext = await this.getUserLastContext(userId);
-    if (lastContext?.organization_id) {
-      const settings = await this.getOrganizationSettings(lastContext.organization_id);
+  async resolveLoginContext(tenantUuid: string, userUuid: string): Promise<ResolvedContext> {
+    const lastContext = await this.getUserLastContext(userUuid);
+    if (lastContext?.organization_uuid) {
+      const settings = await this.getOrganizationSettings(lastContext.organization_uuid);
       if (settings?.remember_last_context) {
         await this.ensureWorkspaceRequirement(
-          lastContext.organization_id,
-          lastContext.workspace_id
+          lastContext.organization_uuid,
+          lastContext.workspace_uuid
         );
         return {
-          organizationId: lastContext.organization_id,
-          workspaceId: lastContext.workspace_id
+          organizationId: lastContext.organization_uuid,
+          workspaceId: lastContext.workspace_uuid
         };
       }
     }
 
-    const defaultOrgId = await this.getDefaultOrganization(tenantId);
-    if (!defaultOrgId) {
+    const defaultOrgUuid = await this.getDefaultOrganization(tenantUuid);
+    if (!defaultOrgUuid) {
       throw new BadRequestException("Organizacao padrao nao configurada.");
     }
 
-    await this.ensureWorkspaceRequirement(defaultOrgId, null);
-    return { organizationId: defaultOrgId, workspaceId: null };
+    await this.ensureWorkspaceRequirement(defaultOrgUuid, null);
+    return { organizationId: defaultOrgUuid, workspaceId: null };
   }
 
   async switchContext(params: {
@@ -81,68 +80,106 @@ export class AuthContextService {
     return { organizationId: params.organizationId, workspaceId: params.workspaceId };
   }
 
-  private async getUserLastContext(userId: string): Promise<LastContextRow | null> {
+  private async getUserLastContext(userUuid: string): Promise<LastContextRow | null> {
     const result = await this.pool.query<LastContextRow>(
-      "SELECT organization_id, workspace_id FROM res_user_last_context WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
-      [userId]
+      `SELECT o.uuid AS organization_uuid, w.uuid AS workspace_uuid
+       FROM res_user_last_context uc
+       JOIN res_users u ON u.id = uc.user_id
+       LEFT JOIN res_organizations o ON o.id = uc.organization_id
+       LEFT JOIN res_workspaces w ON w.id = uc.workspace_id
+       WHERE u.uuid = $1
+       ORDER BY uc.updated_at DESC LIMIT 1`,
+      [userUuid]
     );
 
     return (result.rowCount ?? 0) > 0 ? result.rows[0] : null;
   }
 
-  private async getOrganizationSettings(organizationId: string | null) {
-    if (!organizationId) {
+  private async getOrganizationSettings(organizationUuid: string | null) {
+    if (!organizationUuid) {
       return null;
     }
 
     const result = await this.pool.query<OrganizationSettings>(
-      "SELECT workspace_mode, remember_last_context FROM res_organization_settings WHERE organization_id = $1",
-      [organizationId]
+      `SELECT s.workspace_mode, s.remember_last_context
+       FROM res_organization_settings s
+       JOIN res_organizations o ON o.id = s.organization_id
+       WHERE o.uuid = $1`,
+      [organizationUuid]
     );
 
     return (result.rowCount ?? 0) > 0 ? result.rows[0] : null;
   }
 
-  private async getDefaultOrganization(tenantId: string): Promise<string | null> {
-    const result = await this.pool.query<{ id: string }>(
-      "SELECT id FROM res_organizations WHERE tenant_id = $1 AND is_default = true LIMIT 1",
-      [tenantId]
+  private async getDefaultOrganization(tenantUuid: string): Promise<string | null> {
+    const result = await this.pool.query<{ uuid: string }>(
+      `SELECT o.uuid FROM res_organizations o
+       JOIN tenants t ON t.id = o.tenant_id
+       WHERE t.uuid = $1 AND o.is_default = true LIMIT 1`,
+      [tenantUuid]
     );
 
-    return (result.rowCount ?? 0) > 0 ? result.rows[0].id : null;
+    return (result.rowCount ?? 0) > 0 ? result.rows[0].uuid : null;
   }
 
-  private async ensureWorkspaceRequirement(organizationId: string, workspaceId: string | null) {
-    const settings = await this.getOrganizationSettings(organizationId);
-    if (settings?.workspace_mode === "required" && !workspaceId) {
+  private async ensureWorkspaceRequirement(organizationUuid: string, workspaceUuid: string | null) {
+    const settings = await this.getOrganizationSettings(organizationUuid);
+    if (settings?.workspace_mode === "required" && !workspaceUuid) {
       throw new BadRequestException("Workspace obrigatorio para esta organizacao.");
     }
   }
 
-  private async organizationBelongsToTenant(organizationId: string, tenantId: string) {
+  private async organizationBelongsToTenant(organizationUuid: string, tenantUuid: string) {
     const result = await this.pool.query(
-      "SELECT 1 FROM res_organizations WHERE id = $1 AND tenant_id = $2",
-      [organizationId, tenantId]
+      `SELECT 1 FROM res_organizations o
+       JOIN tenants t ON t.id = o.tenant_id
+       WHERE o.uuid = $1 AND t.uuid = $2`,
+      [organizationUuid, tenantUuid]
     );
 
     return (result.rowCount ?? 0) > 0;
   }
 
-  private async workspaceBelongsToOrganization(workspaceId: string, organizationId: string) {
+  private async workspaceBelongsToOrganization(workspaceUuid: string, organizationUuid: string) {
     const result = await this.pool.query(
-      "SELECT 1 FROM res_workspaces WHERE id = $1 AND organization_id = $2",
-      [workspaceId, organizationId]
+      `SELECT 1 FROM res_workspaces w
+       JOIN res_organizations o ON o.id = w.organization_id
+       WHERE w.uuid = $1 AND o.uuid = $2`,
+      [workspaceUuid, organizationUuid]
     );
 
     return (result.rowCount ?? 0) > 0;
   }
 
   private async saveUserLastContext(
-    userId: string,
-    organizationId: string,
-    workspaceId: string | null
+    userUuid: string,
+    organizationUuid: string,
+    workspaceUuid: string | null
   ) {
-    const existing = await this.pool.query<{ id: string }>(
+    const userIdRes = await this.pool.query<{ id: number }>(
+      "SELECT id FROM res_users WHERE uuid = $1",
+      [userUuid]
+    );
+    const userId = userIdRes.rows[0]?.id;
+    if (!userId) return;
+
+    const orgIdRes = await this.pool.query<{ id: number }>(
+      "SELECT id FROM res_organizations WHERE uuid = $1",
+      [organizationUuid]
+    );
+    const organizationId = orgIdRes.rows[0]?.id;
+    if (!organizationId) return;
+
+    let workspaceId: number | null = null;
+    if (workspaceUuid) {
+      const wsIdRes = await this.pool.query<{ id: number }>(
+        "SELECT id FROM res_workspaces WHERE uuid = $1",
+        [workspaceUuid]
+      );
+      workspaceId = wsIdRes.rows[0]?.id ?? null;
+    }
+
+    const existing = await this.pool.query<{ id: number }>(
       "SELECT id FROM res_user_last_context WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
       [userId]
     );
@@ -156,8 +193,8 @@ export class AuthContextService {
     }
 
     await this.pool.query(
-      "INSERT INTO res_user_last_context (id, user_id, organization_id, workspace_id, updated_at) VALUES ($1, $2, $3, $4, now())",
-      [randomUUID(), userId, organizationId, workspaceId]
+      "INSERT INTO res_user_last_context (user_id, organization_id, workspace_id, updated_at) VALUES ($1, $2, $3, now())",
+      [userId, organizationId, workspaceId]
     );
   }
 }

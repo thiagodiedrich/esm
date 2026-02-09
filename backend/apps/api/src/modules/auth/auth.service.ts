@@ -30,12 +30,13 @@ interface IssueTokensInput {
 }
 
 interface UserRecord {
-  id: string;
+  id: number;
+  uuid: string;
   password_hash: string | null;
   is_active: boolean | null;
-  tenant_id?: string;
-  partner_id?: string | null;
-  organization_id?: string | null;
+  tenant_id?: number;
+  partner_id?: number | null;
+  organization_id?: number | null;
   email?: string | null;
 }
 
@@ -118,12 +119,19 @@ export class AuthService {
     return payload;
   }
 
-  async validateUserCredentials(tenantId: string, email: string, password: string) {
-    const key = `${tenantId}:${email.toLowerCase()}`;
+  async validateUserCredentials(tenantUuid: string, email: string, password: string) {
+    const key = `${tenantUuid}:${email.toLowerCase()}`;
     this.assertNotBlocked(key);
 
+    const tenantIdRes = await this.pool.query<{ id: number }>(
+      "SELECT id FROM tenants WHERE uuid = $1",
+      [tenantUuid]
+    );
+    if (tenantIdRes.rowCount === 0) return null;
+
+    const tenantId = tenantIdRes.rows[0].id;
     const result = await this.pool.query<UserRecord>(
-      "SELECT id, password_hash, is_active FROM res_users WHERE tenant_id = $1 AND email = $2",
+      "SELECT id, uuid, password_hash, is_active FROM res_users WHERE tenant_id = $1 AND email = $2",
       [tenantId, email]
     );
 
@@ -145,7 +153,7 @@ export class AuthService {
     }
 
     this.clearFailedAttempts(key);
-    return { id: user.id };
+    return { id: user.id, uuid: user.uuid };
   }
 
   /**
@@ -153,19 +161,21 @@ export class AuthService {
    * Usado em login e refresh para o frontend exibir header/contexto sem depender de GET /me.
    */
   async getLoginDisplayNames(
-    tenantId: string,
-    userId: string,
-    organizationId: string,
-    workspaceId: string | null
+    tenantUuid: string,
+    userUuid: string,
+    organizationUuid: string,
+    workspaceUuid: string | null
   ): Promise<{ tenantSlug: string; name: string; organizationName: string; workspaceName: string | null }> {
     const slugResult = await this.pool.query<{ slug: string }>(
-      "SELECT slug FROM tenants WHERE id = $1",
-      [tenantId]
+      "SELECT slug FROM tenants WHERE uuid = $1",
+      [tenantUuid]
     );
     const tenantSlug = slugResult.rows[0]?.slug ?? "";
-    const userResult = await this.pool.query<{ partner_id: string | null; email: string | null }>(
-      "SELECT partner_id, email FROM res_users WHERE tenant_id = $1 AND id = $2",
-      [tenantId, userId]
+    const userResult = await this.pool.query<{ partner_id: number | null; email: string | null }>(
+      `SELECT u.partner_id, u.email FROM res_users u
+       JOIN tenants t ON t.id = u.tenant_id
+       WHERE t.uuid = $1 AND u.uuid = $2`,
+      [tenantUuid, userUuid]
     );
     let name = "Usuário";
     if (userResult.rowCount) {
@@ -182,25 +192,40 @@ export class AuthService {
       }
     }
     const orgResult = await this.pool.query<{ name: string | null }>(
-      "SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2",
-      [organizationId, tenantId]
+      `SELECT o.name FROM res_organizations o
+       JOIN tenants t ON t.id = o.tenant_id
+       WHERE o.uuid = $1 AND t.uuid = $2`,
+      [organizationUuid, tenantUuid]
     );
     const organizationName = orgResult.rows[0]?.name ?? "";
     let workspaceName: string | null = null;
-    if (workspaceId) {
+    if (workspaceUuid) {
       const wsResult = await this.pool.query<{ name: string | null }>(
-        "SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2",
-        [workspaceId, organizationId]
+        `SELECT w.name FROM res_workspaces w
+         JOIN res_organizations o ON o.id = w.organization_id
+         WHERE w.uuid = $1 AND o.uuid = $2`,
+        [workspaceUuid, organizationUuid]
       );
       workspaceName = wsResult.rows[0]?.name ?? null;
     }
     return { tenantSlug, name, organizationName, workspaceName };
   }
 
-  async getUserById(tenantId: string, userId: string) {
-    const result = await this.pool.query<UserRecord>(
-      "SELECT id, tenant_id, partner_id, email, is_active FROM res_users WHERE tenant_id = $1 AND id = $2",
-      [tenantId, userId]
+  async getUserById(tenantUuid: string, userUuid: string) {
+    const result = await this.pool.query<{
+      id: number;
+      uuid: string;
+      tenant_id: number;
+      partner_id: number | null;
+      email: string | null;
+      is_active: boolean | null;
+      tenant_uuid: string;
+    }>(
+      `SELECT u.id, u.uuid, u.tenant_id, u.partner_id, u.email, u.is_active, t.uuid AS tenant_uuid
+       FROM res_users u
+       JOIN tenants t ON t.id = u.tenant_id
+       WHERE t.uuid = $1 AND u.uuid = $2`,
+      [tenantUuid, userUuid]
     );
     if (result.rowCount === 0) {
       return null;
@@ -208,7 +233,8 @@ export class AuthService {
     const user = result.rows[0];
     return {
       id: user.id,
-      tenant_id: user.tenant_id,
+      uuid: user.uuid,
+      tenant_id: user.tenant_uuid,
       partner_id: user.partner_id ?? null,
       email: user.email ?? "",
       is_active: user.is_active ?? null
@@ -220,25 +246,27 @@ export class AuthService {
    * current_context (com nomes e workspace_mode), requires_context_selection.
    */
   async getMePayload(
-    tenantId: string,
-    userId: string,
+    tenantUuid: string,
+    userUuid: string,
     context: { organizationId?: string; workspaceId?: string | null }
   ): Promise<GetMePayloadResult | null> {
     const userResult = await this.pool.query<{
-      id: string;
-      tenant_id: string;
-      partner_id: string | null;
+      id: number;
+      uuid: string;
+      tenant_id: number;
+      partner_id: number | null;
+      partner_uuid: string | null;
       email: string | null;
       is_active: boolean | null;
       tenant_slug: string;
       partner_name: string | null;
     }>(
-      `SELECT u.id, u.tenant_id, u.partner_id, u.email, u.is_active, t.slug AS tenant_slug, p.name AS partner_name
+      `SELECT u.id, u.uuid, u.tenant_id, u.partner_id, p.uuid AS partner_uuid, u.email, u.is_active, t.slug AS tenant_slug, p.name AS partner_name
        FROM res_users u
        JOIN tenants t ON t.id = u.tenant_id
        LEFT JOIN res_partners p ON p.id = u.partner_id
-       WHERE u.tenant_id = $1 AND u.id = $2`,
-      [tenantId, userId]
+       WHERE t.uuid = $1 AND u.uuid = $2`,
+      [tenantUuid, userUuid]
     );
     if (userResult.rowCount === 0) {
       return null;
@@ -246,30 +274,39 @@ export class AuthService {
     const row = userResult.rows[0];
     const name = (row.partner_name ?? row.email ?? "Usuário").trim() || "Usuário";
 
+    const tenantIdRes = await this.pool.query<{ id: number }>(
+      "SELECT id FROM tenants WHERE uuid = $1",
+      [tenantUuid]
+    );
+    const tenantId = tenantIdRes.rows[0]?.id;
+    if (!tenantId) return null;
+
     const orgsResult = await this.pool.query<{
-      id: string;
+      id: number;
+      uuid: string;
       name: string | null;
       is_default: boolean | null;
     }>(
-      "SELECT id, name, is_default FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at",
+      "SELECT id, uuid, name, is_default FROM res_organizations WHERE tenant_id = $1 ORDER BY created_at",
       [tenantId]
     );
     const orgIds = orgsResult.rows.map((o) => o.id);
-    let workspacesByOrg: Map<string, Array<{ id: string; name: string; is_active: boolean }>> =
+    let workspacesByOrg: Map<number, Array<{ id: string; name: string; is_active: boolean }>> =
       new Map();
     if (orgIds.length > 0) {
       const wsResult = await this.pool.query<{
-        id: string;
-        organization_id: string;
+        id: number;
+        uuid: string;
+        organization_id: number;
         name: string | null;
       }>(
-        "SELECT id, organization_id, name FROM res_workspaces WHERE organization_id = ANY($1::uuid[])",
+        "SELECT id, uuid, organization_id, name FROM res_workspaces WHERE organization_id = ANY($1::int[])",
         [orgIds]
       );
       for (const ws of wsResult.rows) {
         const list = workspacesByOrg.get(ws.organization_id) ?? [];
         list.push({
-          id: ws.id,
+          id: ws.uuid,
           name: ws.name ?? "",
           is_active: true
         });
@@ -277,53 +314,64 @@ export class AuthService {
       }
     }
     const organizations: MeOrganization[] = orgsResult.rows.map((o) => ({
-      id: o.id,
+      id: o.uuid,
       name: o.name ?? "",
       is_default: o.is_default ?? false,
       workspaces: workspacesByOrg.get(o.id) ?? []
     }));
 
     let current_context: MeCurrentContext | null = null;
-    const organizationId = context.organizationId;
-    const workspaceId = context.workspaceId ?? null;
+    const organizationUuid = context.organizationId;
+    const workspaceUuid = context.workspaceId ?? null;
 
-    if (organizationId) {
+    if (organizationUuid) {
       const orgRow = await this.pool.query<{ name: string | null }>(
-        "SELECT name FROM res_organizations WHERE id = $1 AND tenant_id = $2",
-        [organizationId, tenantId]
+        `SELECT o.name FROM res_organizations o
+         JOIN tenants t ON t.id = o.tenant_id
+         WHERE o.uuid = $1 AND t.uuid = $2`,
+        [organizationUuid, tenantUuid]
       );
       const organization_name = orgRow.rowCount ? (orgRow.rows[0].name ?? "") : "";
       let workspace_name: string | null = null;
-      if (workspaceId) {
+      if (workspaceUuid) {
         const wsRow = await this.pool.query<{ name: string | null }>(
-          "SELECT name FROM res_workspaces WHERE id = $1 AND organization_id = $2",
-          [workspaceId, organizationId]
+          `SELECT w.name FROM res_workspaces w
+           JOIN res_organizations o ON o.id = w.organization_id
+           WHERE w.uuid = $1 AND o.uuid = $2`,
+          [workspaceUuid, organizationUuid]
         );
         workspace_name = wsRow.rowCount ? (wsRow.rows[0].name ?? null) : null;
       }
       const settingsRow = await this.pool.query<{ workspace_mode: string | null }>(
-        "SELECT workspace_mode FROM res_organization_settings WHERE organization_id = $1",
-        [organizationId]
+        `SELECT s.workspace_mode FROM res_organization_settings s
+         JOIN res_organizations o ON o.id = s.organization_id
+         WHERE o.uuid = $1`,
+        [organizationUuid]
       );
       const workspace_mode =
         settingsRow.rows[0]?.workspace_mode === "required" ? "required" : "optional";
 
       current_context = {
-        organization_id: organizationId,
+        organization_id: organizationUuid,
         organization_name,
-        workspace_id: workspaceId,
+        workspace_id: workspaceUuid,
         workspace_name,
         workspace_mode
       };
     }
 
+    const tenantUuidRes = await this.pool.query<{ uuid: string }>(
+      "SELECT uuid FROM tenants WHERE id = $1",
+      [row.tenant_id]
+    );
+
     return {
-      user_id: row.id,
+      user_id: row.uuid,
       email: row.email ?? "",
       name,
-      tenant_id: row.tenant_id,
+      tenant_id: tenantUuidRes.rows[0]?.uuid ?? "",
       tenant_slug: row.tenant_slug ?? "",
-      partner_id: row.partner_id,
+      partner_id: row.partner_uuid ?? null,
       is_active: row.is_active,
       organizations,
       current_context,

@@ -5,7 +5,8 @@ import { Pool } from "pg";
 import { PG_POOL } from "../database/database.module";
 
 export interface TenantRecord {
-  id: string;
+  id: number;
+  uuid: string;
   slug: string;
 }
 
@@ -53,7 +54,7 @@ export class AuthTenantService {
       if (tenant) return tenant;
     }
 
-    throw new BadRequestException("1 - Tenant não encontrado");
+    throw new BadRequestException("Code 1: Tenant não encontrado");
   }
 
   private async resolveDefaultTenant(): Promise<TenantRecord> {
@@ -70,7 +71,7 @@ export class AuthTenantService {
       if (tenant) return tenant;
     }
 
-    throw new BadRequestException("2 - Tenant padrão não encontrado");
+    throw new BadRequestException("Code 2: Tenant padrão não encontrado");
   }
 
   private async resolveTenantFromRequest(request?: FastifyRequest): Promise<TenantRecord> {
@@ -92,7 +93,7 @@ export class AuthTenantService {
       if (tenant) return tenant;
     }
 
-    throw new BadRequestException("3 - Tenant não encontrado");
+    throw new BadRequestException("Code 3: Tenant não encontrado");
   }
 
   private getTenantIdFromHeader(request?: FastifyRequest): string | undefined {
@@ -123,17 +124,20 @@ export class AuthTenantService {
     return subdomain?.trim() || undefined;
   }
 
-  private async findTenantById(id: string): Promise<TenantRecord | null> {
-    const result = await this.pool.query<TenantRecord>(
-      "SELECT id, slug FROM tenants WHERE id = $1",
-      [id]
+  private async findTenantById(idOrUuid: string): Promise<TenantRecord | null> {
+    const isNumericId = /^\d+$/.test(idOrUuid.trim());
+    const result = await this.pool.query<{ id: number; uuid: string; slug: string }>(
+      isNumericId
+        ? "SELECT id, uuid, slug FROM tenants WHERE id = $1"
+        : "SELECT id, uuid, slug FROM tenants WHERE uuid = $1",
+      [isNumericId ? parseInt(idOrUuid, 10) : idOrUuid]
     );
     return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
   }
 
   private async findTenantBySlug(slug: string): Promise<TenantRecord | null> {
-    const result = await this.pool.query<TenantRecord>(
-      "SELECT id, slug FROM tenants WHERE slug = $1",
+    const result = await this.pool.query<{ id: number; uuid: string; slug: string }>(
+      "SELECT id, uuid, slug FROM tenants WHERE slug = $1",
       [slug]
     );
     return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;

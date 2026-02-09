@@ -116,12 +116,15 @@ let AuthTenantService = class AuthTenantService {
         const [subdomain] = host.split(".");
         return subdomain?.trim() || undefined;
     }
-    async findTenantById(id) {
-        const result = await this.pool.query("SELECT id, slug FROM tenants WHERE id = $1", [id]);
+    async findTenantById(idOrUuid) {
+        const isNumericId = /^\d+$/.test(idOrUuid.trim());
+        const result = await this.pool.query(isNumericId
+            ? "SELECT id, uuid, slug FROM tenants WHERE id = $1"
+            : "SELECT id, uuid, slug FROM tenants WHERE uuid = $1", [isNumericId ? parseInt(idOrUuid, 10) : idOrUuid]);
         return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
     }
     async findTenantBySlug(slug) {
-        const result = await this.pool.query("SELECT id, slug FROM tenants WHERE slug = $1", [slug]);
+        const result = await this.pool.query("SELECT id, uuid, slug FROM tenants WHERE slug = $1", [slug]);
         return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
     }
     extractTenantSlug(request) {

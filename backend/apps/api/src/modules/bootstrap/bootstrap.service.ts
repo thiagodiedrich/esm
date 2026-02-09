@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { Pool } from "pg";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
+import { resolveUuidToId } from "../database/uuid-resolver";
 import { BrandingService } from "../branding/branding.service";
 import { StorageService } from "../storage/storage.service";
 import { PG_POOL } from "../database/database.module";
@@ -124,48 +125,78 @@ export class BootstrapService implements OnApplicationBootstrap {
     try {
       await this.pool.query("BEGIN");
       transactionOpen = true;
-      const resolvedTenantId = await this.ensureTenant(tenantId, defaults.tenantName, defaults.tenantSlug);
-      await this.ensureOrganization(organizationId, resolvedTenantId, defaults.organizationName);
+
+      // 1 - cria o tenant (se nao existir)
+      const { id: resolvedTenantId, created: tenantCreated } = await this.ensureTenant(
+        tenantId,
+        defaults.tenantName,
+        defaults.tenantSlug
+      );
+
+      // 2 - cria a organization
+      const resolvedOrgId = await this.ensureOrganization(organizationId, resolvedTenantId, defaults.organizationName);
+
+      // 3 - cria o partner da organization
+      const orgPartnerId = await this.ensureOrgPartner(
+        defaults.organizationName,
+        resolvedTenantId,
+        resolvedOrgId
+      );
+      await this.pool.query(
+        "UPDATE res_organizations SET partner_id = $2, updated_at = now() WHERE id = $1",
+        [resolvedOrgId, orgPartnerId]
+      );
+
+      // 4 - cria o workspace
       await this.ensureWorkspace(
         workspaceId,
         resolvedTenantId,
-        organizationId,
+        resolvedOrgId,
         defaults.workspaceName
       );
 
-      await this.pool.query(
-        "UPDATE tenants SET is_super_tenant = true, updated_at = now() WHERE id = $1",
-        [resolvedTenantId]
-      );
+      if (tenantCreated) {
+        await this.pool.query(
+          "UPDATE tenants SET is_super_tenant = true, updated_at = now() WHERE id = $1",
+          [resolvedTenantId]
+        );
+      }
 
-      const userExists = await this.pool.query<{ id: string }>(
+      const userExists = await this.pool.query<{ id: number }>(
         "SELECT id FROM res_users WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)",
         [resolvedTenantId, email]
       );
       if ((userExists.rowCount ?? 0) > 0) {
-        const userId = userExists.rows[0].id;
-        await this.pool.query(
-          `UPDATE res_users
-           SET is_super_tenant = true, is_super_admin = true, organization_id = $2, updated_at = now()
-           WHERE id = $1`,
-          [userId, organizationId]
-        );
-        await this.applyRoles(userId, resolvedTenantId, roleIds);
         await this.pool.query("COMMIT");
-        this.logger.log("Bootstrap admin: usuario ja existe, flags is_super_tenant/is_super_admin atualizados.");
+        this.logger.log("Bootstrap admin: usuario ja existe; nenhuma alteracao aplicada.");
         return;
       }
 
-      const partnerId = await this.ensurePartner(name || username || email, email, resolvedTenantId, organizationId);
+      // 5 - cria o user (partner_id NULL inicialmente)
       const hashedPassword = await bcrypt.hash(password, 12);
-
-      const userId = randomUUID();
       await this.pool.query(
         `INSERT INTO res_users
-         (id, tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, TRUE, $6, now(), now())`,
-        [userId, resolvedTenantId, partnerId, email, hashedPassword, organizationId]
+         (tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
+         VALUES ($1, NULL, $2, $3, TRUE, TRUE, TRUE, $4, now(), now())`,
+        [resolvedTenantId, email, hashedPassword, resolvedOrgId]
       );
+
+      // 6 - cria o partner do user e vincula
+      const userPartnerId = await this.ensureUserPartner(
+        name || username || email,
+        email,
+        resolvedTenantId,
+        resolvedOrgId
+      );
+      await this.pool.query(
+        "UPDATE res_users SET partner_id = $2, updated_at = now() WHERE tenant_id = $1 AND LOWER(email) = LOWER($3)",
+        [resolvedTenantId, userPartnerId, email]
+      );
+      const userResult = await this.pool.query<{ id: number }>(
+        "SELECT id FROM res_users WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)",
+        [resolvedTenantId, email]
+      );
+      const userId = userResult.rows[0].id;
 
       await this.applyRoles(userId, resolvedTenantId, roleIds);
       await this.pool.query("COMMIT");
@@ -206,9 +237,9 @@ export class BootstrapService implements OnApplicationBootstrap {
 
       const description = this.buildPlanDescription();
       await this.pool.query(
-        `INSERT INTO platform_plans (id, code, name, description, created_at)
-         VALUES ($1, $2, $3, $4, now())`,
-        [randomUUID(), code, name, description]
+        `INSERT INTO platform_plans (code, name, description, created_at)
+         VALUES ($1, $2, $3, now())`,
+        [code, name, description]
       );
 
       this.logger.log(`Plano default criado: ${code}`);
@@ -254,68 +285,59 @@ export class BootstrapService implements OnApplicationBootstrap {
     }
   }
 
-  private async ensureTenant(tenantId: string, name: string, slug: string): Promise<string> {
-    const existsById = await this.pool.query<{ id: string }>("SELECT id FROM tenants WHERE id = $1", [
-      tenantId
+  private async ensureTenant(tenantUuid: string, name: string, slug: string): Promise<{ id: number; created: boolean }> {
+    const existsByUuid = await this.pool.query<{ id: number }>("SELECT id FROM tenants WHERE uuid = $1", [
+      tenantUuid
     ]);
-    if ((existsById.rowCount ?? 0) > 0) {
-      return existsById.rows[0].id;
+    if ((existsByUuid.rowCount ?? 0) > 0) {
+      return { id: existsByUuid.rows[0].id, created: false };
     }
 
-    const existsBySlug = await this.pool.query<{ id: string }>(
+    const existsBySlug = await this.pool.query<{ id: number }>(
       "SELECT id FROM tenants WHERE slug = $1",
       [slug]
     );
     if ((existsBySlug.rowCount ?? 0) > 0) {
-      return existsBySlug.rows[0].id;
+      return { id: existsBySlug.rows[0].id, created: false };
     }
 
-    const result = await this.pool.query<{ id: string }>(
+    const result = await this.pool.query<{ id: number }>(
       `INSERT INTO tenants
-       (id, name, slug, db_strategy, migration_status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), now())
+       (name, slug, db_strategy, migration_status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, now(), now())
        ON CONFLICT (slug) DO UPDATE SET updated_at = now()
        RETURNING id`,
-      [tenantId, name, slug, "shared", "idle"]
+      [name, slug, "shared", "idle"]
+    );
+    return { id: result.rows[0].id, created: true };
+  }
+
+  private async ensureOrganization(organizationUuid: string, tenantId: number, name: string): Promise<number> {
+    const exists = await this.pool.query<{ id: number }>("SELECT id FROM res_organizations WHERE uuid = $1", [
+      organizationUuid
+    ]);
+    if ((exists.rowCount ?? 0) > 0) {
+      return exists.rows[0].id;
+    }
+
+    const result = await this.pool.query<{ id: number }>(
+      `INSERT INTO res_organizations
+       (uuid, tenant_id, partner_id, name, is_default, created_at, updated_at)
+       VALUES ($1, $2, NULL, $3, TRUE, now(), now())
+       RETURNING id`,
+      [organizationUuid, tenantId, name]
     );
     return result.rows[0].id;
   }
 
-  private async ensureOrganization(organizationId: string, tenantId: string, name: string) {
-    const exists = await this.pool.query("SELECT id FROM res_organizations WHERE id = $1", [
-      organizationId
-    ]);
-    if ((exists.rowCount ?? 0) > 0) {
-      return;
-    }
-
-    await this.pool.query(
-      `INSERT INTO res_organizations
-       (id, tenant_id, partner_id, name, is_default, created_at, updated_at)
-       VALUES ($1, $2, NULL, $3, TRUE, now(), now())`,
-      [organizationId, tenantId, name]
-    );
-  }
-
-  private async ensureOrganizationPartner(
-    organizationId: string,
-    tenantId: string,
-    partnerId: string
-  ) {
-    await this.pool.query(
-      "UPDATE res_organizations SET partner_id = $2, updated_at = now() WHERE id = $1 AND tenant_id = $3",
-      [organizationId, partnerId, tenantId]
-    );
-  }
-
   private async ensureWorkspace(
-    workspaceId: string,
-    tenantId: string,
-    organizationId: string,
+    workspaceUuid: string,
+    tenantId: number,
+    organizationId: number,
     name: string
   ) {
-    const exists = await this.pool.query("SELECT id FROM res_workspaces WHERE id = $1", [
-      workspaceId
+    const exists = await this.pool.query("SELECT id FROM res_workspaces WHERE uuid = $1", [
+      workspaceUuid
     ]);
     if ((exists.rowCount ?? 0) > 0) {
       return;
@@ -323,50 +345,83 @@ export class BootstrapService implements OnApplicationBootstrap {
 
     await this.pool.query(
       `INSERT INTO res_workspaces
-       (id, tenant_id, organization_id, name, created_at, updated_at)
+       (uuid, tenant_id, organization_id, name, created_at, updated_at)
        VALUES ($1, $2, $3, $4, now(), now())`,
-      [workspaceId, tenantId, organizationId, name]
+      [workspaceUuid, tenantId, organizationId, name]
     );
   }
 
-  private async ensurePartner(
+  private async ensureOrgPartner(
+    orgName: string,
+    tenantId: number,
+    organizationId: number
+  ): Promise<number> {
+    const orgHasPartner = await this.pool.query<{ partner_id: number }>(
+      "SELECT partner_id FROM res_organizations WHERE id = $1 AND partner_id IS NOT NULL",
+      [organizationId]
+    );
+    if ((orgHasPartner.rowCount ?? 0) > 0 && orgHasPartner.rows[0].partner_id) {
+      return orgHasPartner.rows[0].partner_id;
+    }
+
+    const existing = await this.pool.query<{ id: number }>(
+      "SELECT id FROM res_partners WHERE tenant_id = $1 AND organization_id = $2 AND email IS NULL LIMIT 1",
+      [tenantId, organizationId]
+    );
+    if ((existing.rowCount ?? 0) > 0) {
+      return existing.rows[0].id;
+    }
+
+    const result = await this.pool.query<{ id: number }>(
+      `INSERT INTO res_partners
+       (tenant_id, organization_id, name, email, created_at, updated_at)
+       VALUES ($1, $2, $3, NULL, now(), now())
+       RETURNING id`,
+      [tenantId, organizationId, orgName]
+    );
+    return result.rows[0].id;
+  }
+
+  private async ensureUserPartner(
     name: string,
     email: string,
-    tenantId: string,
-    organizationId: string
-  ): Promise<string> {
-    const existing = await this.pool.query(
-      "SELECT id FROM res_partners WHERE tenant_id = $1 AND email = $2",
+    tenantId: number,
+    organizationId: number
+  ): Promise<number> {
+    const existing = await this.pool.query<{ id: number }>(
+      "SELECT id FROM res_partners WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)",
       [tenantId, email]
     );
     if ((existing.rowCount ?? 0) > 0) {
       return existing.rows[0].id;
     }
 
-    const id = randomUUID();
-    await this.pool.query(
+    const result = await this.pool.query<{ id: number }>(
       `INSERT INTO res_partners
-       (id, tenant_id, organization_id, name, email, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), now())`,
-      [id, tenantId, organizationId, name, email]
+       (tenant_id, organization_id, name, email, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, now(), now())
+       RETURNING id`,
+      [tenantId, organizationId, name, email]
     );
-    return id;
+    return result.rows[0].id;
   }
 
-  private async applyRoles(userId: string, tenantId: string, roleIds: string[]) {
-    if (roleIds.length === 0) {
+  private async applyRoles(userId: number, tenantId: number, roleUuids: string[]) {
+    if (roleUuids.length === 0) {
       if (this.configService.get<string>("TENANT_MASTER_ADMIN_ROLE")) {
         this.logger.warn("TENANT_MASTER_ADMIN_ROLE invalido ou vazio; roles ignoradas.");
       }
       return;
     }
 
-    for (const roleId of roleIds) {
+    for (const roleUuid of roleUuids) {
+      const roleId = await resolveUuidToId(this.pool, "res_roles", roleUuid);
+      if (!roleId) continue;
       await this.pool.query(
         `INSERT INTO res_user_roles
-         (id, user_id, role_id, scope_type, scope_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, now())`,
-        [randomUUID(), userId, roleId, "tenant", tenantId]
+         (user_id, role_id, scope_type, scope_id, created_at)
+         VALUES ($1, $2, $3, $4, now())`,
+        [userId, roleId, "tenant", tenantId]
       );
     }
   }
@@ -387,25 +442,28 @@ export class BootstrapService implements OnApplicationBootstrap {
     const parsedTenantId = this.parseUuid(rawTenantId);
 
     // 2 - procura por tenant_default_id OU tenant_default_slug; se encontrar algum, retorna
+    // com org/workspace REAIS do banco (evita duplicacao ao reiniciar)
     if (parsedTenantId) {
-      const byId = await this.pool.query<{ id: string; slug: string; name: string | null }>(
-        "SELECT id, slug, name FROM tenants WHERE id = $1",
+      const byUuid = await this.pool.query<{ id: number; uuid: string; slug: string; name: string | null }>(
+        "SELECT id, uuid, slug, name FROM tenants WHERE uuid = $1",
         [parsedTenantId]
       );
-      if ((byId.rowCount ?? 0) > 0) {
-        const row = byId.rows[0];
-        return this.buildTenantDefaults(row.id, row.slug, row.name ?? defaultName);
+      if ((byUuid.rowCount ?? 0) > 0) {
+        const row = byUuid.rows[0];
+        const existing = await this.getExistingOrgWorkspaceForTenant(row.id);
+        return this.buildTenantDefaults(row.uuid, row.slug, row.name ?? defaultName, existing);
       }
     }
 
     if (defaultSlug) {
-      const bySlug = await this.pool.query<{ id: string; slug: string; name: string | null }>(
-        "SELECT id, slug, name FROM tenants WHERE slug = $1",
+      const bySlug = await this.pool.query<{ id: number; uuid: string; slug: string; name: string | null }>(
+        "SELECT id, uuid, slug, name FROM tenants WHERE slug = $1",
         [defaultSlug]
       );
       if ((bySlug.rowCount ?? 0) > 0) {
         const row = bySlug.rows[0];
-        return this.buildTenantDefaults(row.id, row.slug, row.name ?? defaultName);
+        const existing = await this.getExistingOrgWorkspaceForTenant(row.id);
+        return this.buildTenantDefaults(row.uuid, row.slug, row.name ?? defaultName, existing);
       }
     }
 
@@ -420,8 +478,8 @@ export class BootstrapService implements OnApplicationBootstrap {
     }
 
     // 3 - nao existe tenant com is_super_tenant = true (todos tem is_super_tenant = false ou nao ha tenants)
-    const superTenantExists = await this.pool.query<{ id: string }>(
-      "SELECT id FROM tenants WHERE is_super_tenant = true LIMIT 1"
+    const superTenantExists = await this.pool.query<{ uuid: string }>(
+      "SELECT uuid FROM tenants WHERE is_super_tenant = true LIMIT 1"
     );
     if ((superTenantExists.rowCount ?? 0) > 0) {
       throw new BadRequestException("Code 4: Tenant padrao invalido");
@@ -436,10 +494,41 @@ export class BootstrapService implements OnApplicationBootstrap {
     return this.buildTenantDefaults(tenantId, defaultSlug, defaultName);
   }
 
+  private async getExistingOrgWorkspaceForTenant(tenantId: number): Promise<{
+    organizationId: string;
+    workspaceId: string;
+  } | null> {
+    const orgResult = await this.pool.query<{ uuid: string }>(
+      `SELECT uuid FROM res_organizations
+       WHERE tenant_id = $1
+       ORDER BY (CASE WHEN is_default = true THEN 0 ELSE 1 END), created_at ASC
+       LIMIT 1`,
+      [tenantId]
+    );
+    if ((orgResult.rowCount ?? 0) === 0) return null;
+    const orgUuid = orgResult.rows[0].uuid;
+    const orgIdResult = await this.pool.query<{ id: number }>(
+      "SELECT id FROM res_organizations WHERE uuid = $1",
+      [orgUuid]
+    );
+    const orgId = orgIdResult.rows[0]?.id;
+    if (!orgId) return { organizationId: orgUuid, workspaceId: randomUUID() };
+
+    const wsResult = await this.pool.query<{ uuid: string }>(
+      `SELECT uuid FROM res_workspaces
+       WHERE organization_id = $1
+       ORDER BY created_at ASC LIMIT 1`,
+      [orgId]
+    );
+    const workspaceId = (wsResult.rowCount ?? 0) > 0 ? wsResult.rows[0].uuid : randomUUID();
+    return { organizationId: orgUuid, workspaceId };
+  }
+
   private buildTenantDefaults(
     tenantId: string,
     tenantSlug: string,
-    tenantName: string
+    tenantName: string,
+    existingOrgWorkspace?: { organizationId: string; workspaceId: string } | null
   ): {
     tenantId: string;
     tenantSlug: string;
@@ -449,6 +538,23 @@ export class BootstrapService implements OnApplicationBootstrap {
     organizationName: string;
     workspaceName: string;
   } {
+    const orgName =
+      this.configService.get<string>("TENANT_DEFAULT_ORGANIZATION_NAME") ?? "Default Organization";
+    const wsName =
+      this.configService.get<string>("TENANT_DEFAULT_WORKSPACE_NAME") ?? "Default Workspace";
+
+    if (existingOrgWorkspace) {
+      return {
+        tenantId,
+        tenantSlug,
+        tenantName,
+        organizationId: existingOrgWorkspace.organizationId,
+        workspaceId: existingOrgWorkspace.workspaceId,
+        organizationName: orgName,
+        workspaceName: wsName
+      };
+    }
+
     const rawOrganizationId = this.configService.get<string>("TENANT_DEFAULT_ORGANIZATION_ID");
     const parsedOrganizationId = this.parseUuid(rawOrganizationId);
     const organizationId = parsedOrganizationId ?? randomUUID();
@@ -473,12 +579,8 @@ export class BootstrapService implements OnApplicationBootstrap {
       tenantName,
       organizationId,
       workspaceId,
-      organizationName:
-        this.configService.get<string>("TENANT_DEFAULT_ORGANIZATION_NAME") ??
-        "Default Organization",
-      workspaceName:
-        this.configService.get<string>("TENANT_DEFAULT_WORKSPACE_NAME") ??
-        "Default Workspace"
+      organizationName: orgName,
+      workspaceName: wsName
     };
   }
 }

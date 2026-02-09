@@ -1,5 +1,5 @@
-import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
+import { MiddlewareConsumer, Module, NestModule, RequestMethod } from "@nestjs/common";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import { APP_GUARD } from "@nestjs/core";
 import { AppController } from "./app.controller";
 import { AuthModule } from "./auth/auth.module";
@@ -83,9 +83,34 @@ import { TenantService } from "./tenant/tenant.service";
   ]
 })
 export class AppModule implements NestModule {
+  constructor(private readonly configService: ConfigService) {}
+
   configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(CorsValidationMiddleware, CorrelationMiddleware, TenancyMiddleware, AuditMiddleware)
-      .forRoutes("*");
+    const publicRoutesRaw =
+      this.configService.get<string>("API_PUBLIC_ROUTES")?.trim() ||
+      process.env.API_PUBLIC_ROUTES?.trim();
+    const excludeRoutes: { path: string; method: RequestMethod }[] = [];
+    if (publicRoutesRaw) {
+      const prefixes = publicRoutesRaw.split(",").map((p) => p.trim()).filter(Boolean);
+      for (const prefix of prefixes) {
+        const path = prefix.startsWith("/") ? prefix : "/" + prefix;
+        excludeRoutes.push({ path, method: RequestMethod.ALL });
+        if (path.length > 1) {
+          excludeRoutes.push({ path: path + "/(.*)", method: RequestMethod.ALL });
+        }
+      }
+    }
+
+    const chain = consumer.apply(
+      CorsValidationMiddleware,
+      CorrelationMiddleware,
+      TenancyMiddleware,
+      AuditMiddleware
+    );
+    if (excludeRoutes.length > 0) {
+      chain.exclude(...excludeRoutes).forRoutes({ path: "*", method: RequestMethod.ALL });
+    } else {
+      chain.forRoutes("*");
+    }
   }
 }

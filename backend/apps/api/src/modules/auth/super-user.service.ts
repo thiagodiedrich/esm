@@ -6,7 +6,7 @@ import { AuthUser } from "./auth.types";
 interface SuperUserRow {
   user_is_super_tenant: boolean;
   user_is_super_admin: boolean;
-  user_organization_id: string | null;
+  user_organization_uuid: string | null;
   tenant_is_super_tenant: boolean;
 }
 
@@ -45,9 +45,9 @@ export class SuperUserService {
     }
     if (
       row.user_is_super_admin &&
-      row.user_organization_id &&
+      row.user_organization_uuid &&
       user.organization_id &&
-      row.user_organization_id === user.organization_id
+      row.user_organization_uuid === user.organization_id
     ) {
       return true;
     }
@@ -67,11 +67,12 @@ export class SuperUserService {
       `SELECT
          u.is_super_tenant AS user_is_super_tenant,
          u.is_super_admin AS user_is_super_admin,
-         u.organization_id AS user_organization_id,
+         o.uuid AS user_organization_uuid,
          COALESCE(t.is_super_tenant, false) AS tenant_is_super_tenant
        FROM res_users u
        JOIN tenants t ON t.id = u.tenant_id
-       WHERE u.id = $1 AND u.tenant_id = $2`,
+       LEFT JOIN res_organizations o ON o.id = u.organization_id
+       WHERE u.uuid = $1 AND t.uuid = $2`,
       [userId, tenantId]
     );
     if (result.rowCount === 0) {
