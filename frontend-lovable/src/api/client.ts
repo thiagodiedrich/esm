@@ -44,13 +44,24 @@ export function resetCorrelationId(): void {
 // ===============================
 
 function getTenantSlug(): string {
+  // VITE_TENANT_SLUG: override fixo (ex.: default-tenant quando o tenant no banco e esse)
+  const override = import.meta.env.VITE_TENANT_SLUG;
+  if (typeof override === 'string' && override.trim()) {
+    return override.trim();
+  }
+
+  // VITE_USE_DEFAULT_TENANT=true: usa default-tenant em qualquer host (testes, quando subdominio nao bate com o banco)
+  if (import.meta.env.VITE_USE_DEFAULT_TENANT === 'true') {
+    return import.meta.env.VITE_DEFAULT_TENANT || 'default-tenant';
+  }
+
   // Per CONTRACTS_BACKEND.md: resolved by domain/subdomain
   const hostname = window.location.hostname;
   const parts = hostname.split('.');
   
   // In development, use a default tenant
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return import.meta.env.VITE_DEFAULT_TENANT || 'default';
+    return import.meta.env.VITE_DEFAULT_TENANT || 'default-tenant';
   }
   
   // Extract subdomain as tenant slug
@@ -58,7 +69,7 @@ function getTenantSlug(): string {
     return parts[0];
   }
   
-  return 'default';
+  return import.meta.env.VITE_DEFAULT_TENANT || 'default-tenant';
 }
 
 // ===============================
