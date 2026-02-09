@@ -29,7 +29,6 @@ let TenancyMiddleware = class TenancyMiddleware {
         if (!enabled) {
             return next();
         }
-        const enforce = (this.configService.get("MULTI_TENANT_ENFORCE") ?? "false").toLowerCase() === "true";
         const tenantHeader = (this.configService.get("TENANT_HEADER") ?? "x-tenant-id").toLowerCase();
         const organizationHeader = (this.configService.get("ORGANIZATION_HEADER") ?? "x-organization-id").toLowerCase();
         const workspaceHeader = (this.configService.get("WORKSPACE_HEADER") ?? "x-workspace-id").toLowerCase();
@@ -85,7 +84,7 @@ let TenancyMiddleware = class TenancyMiddleware {
         if (hostTenantSlug) {
             await this.ensureTenantExists(hostTenantSlug, "slug");
         }
-        if (enforce && !tokenTenant && !headerTenant && !tenantSlugHeader && !hostTenantSlug) {
+        if (!tokenTenant && !headerTenant && !tenantSlugHeader && !hostTenantSlug) {
             throw new common_1.BadRequestException("Tenant nao informado.");
         }
         return next();
@@ -110,7 +109,7 @@ let TenancyMiddleware = class TenancyMiddleware {
         const query = field === "id" ? "SELECT id FROM tenants WHERE id = $1" : "SELECT id FROM tenants WHERE slug = $1";
         const result = await this.pool.query(query, [value]);
         if ((result.rowCount ?? 0) === 0) {
-            throw new common_1.BadRequestException("Tenant nao encontrado.");
+            throw new common_1.BadRequestException("Code 7: Tenant nao encontrado");
         }
     }
     async ensureOrganizationExists(value, tenantId) {

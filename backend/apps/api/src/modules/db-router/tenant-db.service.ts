@@ -44,7 +44,7 @@ export class TenantDbService {
     );
 
     if ((result.rowCount ?? 0) === 0) {
-      throw new BadRequestException("Tenant nao encontrado.");
+      throw new BadRequestException("Code 6: Tenant nao encontrado");
     }
 
     return result.rows[0].erp_db;

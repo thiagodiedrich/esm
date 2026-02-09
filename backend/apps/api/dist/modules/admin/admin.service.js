@@ -128,7 +128,7 @@ let AdminService = class AdminService {
         const result = await this.pool.query(`SELECT id, name, slug, db_strategy, control_plane_db, erp_db, telemetry_db, migration_status, is_super_tenant, created_at, updated_at
        FROM tenants WHERE id = $1`, [id]);
         if (result.rowCount === 0) {
-            throw new common_1.NotFoundException("Tenant nao encontrado.");
+            throw new common_1.NotFoundException("Code 8: Tenant nao encontrado");
         }
         return result.rows[0];
     }
@@ -154,7 +154,7 @@ let AdminService = class AdminService {
             input.migration_status ?? null
         ]);
         if (result.rowCount === 0) {
-            throw new common_1.NotFoundException("Tenant nao encontrado.");
+            throw new common_1.NotFoundException("Code 5: Tenant nao encontrado");
         }
         return result.rows[0];
     }
@@ -164,7 +164,7 @@ let AdminService = class AdminService {
        WHERE id = $1
        RETURNING id, name, slug, migration_status, updated_at`, [id, status]);
         if (result.rowCount === 0) {
-            throw new common_1.NotFoundException("Tenant nao encontrado.");
+            throw new common_1.NotFoundException("Code65: Tenant nao encontrado");
         }
         return result.rows[0];
     }

@@ -20,9 +20,6 @@ export class TenancyMiddleware implements NestMiddleware {
       return next();
     }
 
-    const enforce =
-      (this.configService.get<string>("MULTI_TENANT_ENFORCE") ?? "false").toLowerCase() === "true";
-
     const tenantHeader =
       (this.configService.get<string>("TENANT_HEADER") ?? "x-tenant-id").toLowerCase();
     const organizationHeader =
@@ -88,7 +85,7 @@ export class TenancyMiddleware implements NestMiddleware {
       await this.ensureTenantExists(hostTenantSlug, "slug");
     }
 
-    if (enforce && !tokenTenant && !headerTenant && !tenantSlugHeader && !hostTenantSlug) {
+    if (!tokenTenant && !headerTenant && !tenantSlugHeader && !hostTenantSlug) {
       throw new BadRequestException("Tenant nao informado.");
     }
 
@@ -117,7 +114,7 @@ export class TenancyMiddleware implements NestMiddleware {
     const query = field === "id" ? "SELECT id FROM tenants WHERE id = $1" : "SELECT id FROM tenants WHERE slug = $1";
     const result = await this.pool.query(query, [value]);
     if ((result.rowCount ?? 0) === 0) {
-      throw new BadRequestException("Tenant nao encontrado.");
+      throw new BadRequestException("Code 7: Tenant nao encontrado");
     }
   }
 

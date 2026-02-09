@@ -23,6 +23,7 @@ const menu_controller_1 = require("./menu/menu.controller");
 const menu_service_1 = require("./menu/menu.service");
 const observability_module_1 = require("./observability/observability.module");
 const correlation_middleware_1 = require("./observability/correlation.middleware");
+const cors_validation_middleware_1 = require("./observability/cors-validation.middleware");
 const audit_middleware_1 = require("./observability/audit.middleware");
 const db_router_module_1 = require("./db-router/db-router.module");
 const kafka_module_1 = require("./kafka/kafka.module");
@@ -44,7 +45,9 @@ const tenant_controller_1 = require("./tenant/tenant.controller");
 const tenant_service_1 = require("./tenant/tenant.service");
 let AppModule = class AppModule {
     configure(consumer) {
-        consumer.apply(correlation_middleware_1.CorrelationMiddleware, tenancy_middleware_1.TenancyMiddleware, audit_middleware_1.AuditMiddleware).forRoutes("*");
+        consumer
+            .apply(cors_validation_middleware_1.CorsValidationMiddleware, correlation_middleware_1.CorrelationMiddleware, tenancy_middleware_1.TenancyMiddleware, audit_middleware_1.AuditMiddleware)
+            .forRoutes("*");
     }
 };
 exports.AppModule = AppModule;
@@ -74,6 +77,7 @@ exports.AppModule = AppModule = __decorate([
             tenant_controller_1.TenantController
         ],
         providers: [
+            cors_validation_middleware_1.CorsValidationMiddleware,
             {
                 provide: core_1.APP_GUARD,
                 useClass: auth_guard_1.AppAuthGuard

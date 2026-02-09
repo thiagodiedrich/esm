@@ -17,85 +17,131 @@ export class AuthTenantService {
   ) {}
 
   async resolveTenantOrFail(request?: FastifyRequest): Promise<TenantRecord> {
-    const tenantHeader =
-      (this.configService.get<string>("TENANT_HEADER") ?? "x-tenant-id").toLowerCase();
-    const tenantIdHeader = request?.headers?.[tenantHeader];
-    if (typeof tenantIdHeader === "string" && tenantIdHeader.trim()) {
-      const result = await this.pool.query<TenantRecord>(
-        "SELECT id, slug FROM tenants WHERE id = $1",
-        [tenantIdHeader.trim()]
-      );
-      if (result.rowCount === 0) {
-        throw new BadRequestException("Tenant nao encontrado.");
-      }
-      return result.rows[0];
-    }
-
-    const tenantSlug = this.extractTenantSlug(request);
-    if (tenantSlug) {
-      const result = await this.pool.query<TenantRecord>(
-        "SELECT id, slug FROM tenants WHERE slug = $1",
-        [tenantSlug]
-      );
-      if (result.rowCount === 0) {
-        throw new BadRequestException("Tenant nao encontrado.");
-      }
-      return result.rows[0];
-    }
-
     const multiTenantEnabled =
-      (this.configService.get<string>("MULTI_TENANT_ENABLED") ?? "false").toLowerCase() ===
-      "true";
-    const defaultTenantEnabled =
-      (this.configService.get<string>("TENANT_DEFAULT_ENABLED") ?? "false").toLowerCase() ===
-      "true";
+      (this.configService.get<string>("MULTI_TENANT_ENABLED") ?? "false").toLowerCase() === "true";
 
-    if (!multiTenantEnabled && defaultTenantEnabled) {
-      const defaultTenantId = this.configService.get<string>("TENANT_DEFAULT_ID")?.trim();
-      if (!defaultTenantId) {
-        throw new BadRequestException("TENANT_DEFAULT_ID nao configurado.");
-      }
-      const result = await this.pool.query<TenantRecord>(
-        "SELECT id, slug FROM tenants WHERE id = $1",
-        [defaultTenantId]
-      );
-      if (result.rowCount === 0) {
-        throw new BadRequestException("Tenant nao encontrado.");
-      }
-      return result.rows[0];
+    if (multiTenantEnabled) {
+      return this.resolveMultiTenant(request);
     }
 
-    throw new BadRequestException("Tenant nao identificado.");
+    const defaultTenantEnabled =
+      (this.configService.get<string>("TENANT_DEFAULT_ENABLED") ?? "false").toLowerCase() === "true";
+
+    if (defaultTenantEnabled) {
+      return this.resolveDefaultTenant();
+    }
+
+    return this.resolveTenantFromRequest(request);
   }
 
-  extractTenantSlug(request?: FastifyRequest): string | undefined {
-    const headerSlug = request?.headers["x-tenant-slug"];
-    if (typeof headerSlug === "string" && headerSlug.trim()) {
-      return headerSlug.trim();
+  private async resolveMultiTenant(request?: FastifyRequest): Promise<TenantRecord> {
+    const tenantId = this.getTenantIdFromHeader(request);
+    if (tenantId) {
+      const tenant = await this.findTenantById(tenantId);
+      if (tenant) return tenant;
     }
 
-    const hostHeader = request?.headers.host;
-    if (!hostHeader) {
-      return undefined;
+    const tenantSlug = this.getTenantSlugFromHeader(request);
+    if (tenantSlug) {
+      const tenant = await this.findTenantBySlug(tenantSlug);
+      if (tenant) return tenant;
     }
+
+    const hostSlug = this.extractTenantSlugFromHost(request);
+    if (hostSlug) {
+      const tenant = await this.findTenantBySlug(hostSlug);
+      if (tenant) return tenant;
+    }
+
+    throw new BadRequestException("1 - Tenant não encontrado");
+  }
+
+  private async resolveDefaultTenant(): Promise<TenantRecord> {
+    const defaultTenantId = this.configService.get<string>("TENANT_DEFAULT_ID")?.trim();
+    const defaultTenantSlug = this.configService.get<string>("TENANT_DEFAULT_SLUG")?.trim();
+
+    if (defaultTenantId) {
+      const tenant = await this.findTenantById(defaultTenantId);
+      if (tenant) return tenant;
+    }
+
+    if (defaultTenantSlug) {
+      const tenant = await this.findTenantBySlug(defaultTenantSlug);
+      if (tenant) return tenant;
+    }
+
+    throw new BadRequestException("2 - Tenant padrão não encontrado");
+  }
+
+  private async resolveTenantFromRequest(request?: FastifyRequest): Promise<TenantRecord> {
+    const tenantId = this.getTenantIdFromHeader(request);
+    if (tenantId) {
+      const tenant = await this.findTenantById(tenantId);
+      if (tenant) return tenant;
+    }
+
+    const tenantSlug = this.getTenantSlugFromHeader(request);
+    if (tenantSlug) {
+      const tenant = await this.findTenantBySlug(tenantSlug);
+      if (tenant) return tenant;
+    }
+
+    const hostSlug = this.extractTenantSlugFromHost(request);
+    if (hostSlug) {
+      const tenant = await this.findTenantBySlug(hostSlug);
+      if (tenant) return tenant;
+    }
+
+    throw new BadRequestException("3 - Tenant não encontrado");
+  }
+
+  private getTenantIdFromHeader(request?: FastifyRequest): string | undefined {
+    const header =
+      (this.configService.get<string>("TENANT_HEADER") ?? "x-tenant-id").toLowerCase();
+    const value = request?.headers?.[header];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private getTenantSlugFromHeader(request?: FastifyRequest): string | undefined {
+    const value = request?.headers?.["x-tenant-slug"];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private extractTenantSlugFromHost(request?: FastifyRequest): string | undefined {
+    const hostHeader = request?.headers?.host;
+    if (!hostHeader) return undefined;
 
     const host = hostHeader.split(":")[0];
-    if (!host) {
-      return undefined;
-    }
+    if (!host) return undefined;
 
     const normalizedHost = host.trim().toLowerCase();
-    if (normalizedHost === "localhost") {
-      return undefined;
-    }
-    if (!normalizedHost.includes(".")) {
-      return undefined;
-    }
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalizedHost)) {
-      return undefined;
-    }
+    if (normalizedHost === "localhost") return undefined;
+    if (!normalizedHost.includes(".")) return undefined;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalizedHost)) return undefined;
 
     const [subdomain] = host.split(".");
     return subdomain?.trim() || undefined;
+  }
+
+  private async findTenantById(id: string): Promise<TenantRecord | null> {
+    const result = await this.pool.query<TenantRecord>(
+      "SELECT id, slug FROM tenants WHERE id = $1",
+      [id]
+    );
+    return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
+  }
+
+  private async findTenantBySlug(slug: string): Promise<TenantRecord | null> {
+    const result = await this.pool.query<TenantRecord>(
+      "SELECT id, slug FROM tenants WHERE slug = $1",
+      [slug]
+    );
+    return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
+  }
+
+  extractTenantSlug(request?: FastifyRequest): string | undefined {
+    const headerSlug = this.getTenantSlugFromHeader(request);
+    if (headerSlug) return headerSlug;
+    return this.extractTenantSlugFromHost(request);
   }
 }

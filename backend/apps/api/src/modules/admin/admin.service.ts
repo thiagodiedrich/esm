@@ -202,7 +202,7 @@ export class AdminService {
       [id]
     );
     if (result.rowCount === 0) {
-      throw new NotFoundException("Tenant nao encontrado.");
+      throw new NotFoundException("Code 8: Tenant nao encontrado");
     }
     return result.rows[0];
   }
@@ -232,7 +232,7 @@ export class AdminService {
       ]
     );
     if (result.rowCount === 0) {
-      throw new NotFoundException("Tenant nao encontrado.");
+      throw new NotFoundException("Code 5: Tenant nao encontrado");
     }
     return result.rows[0];
   }
@@ -246,7 +246,7 @@ export class AdminService {
       [id, status]
     );
     if (result.rowCount === 0) {
-      throw new NotFoundException("Tenant nao encontrado.");
+      throw new NotFoundException("Code65: Tenant nao encontrado");
     }
     return result.rows[0];
   }

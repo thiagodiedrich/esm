@@ -47,7 +47,7 @@ export class TenantMigrationService {
     );
 
     if ((result.rowCount ?? 0) === 0) {
-      throw new BadRequestException("Tenant nao encontrado.");
+      throw new BadRequestException("Code 9: Tenant nao encontrado");
     }
   }
 }

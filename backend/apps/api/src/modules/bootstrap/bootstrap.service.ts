@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Pool } from "pg";
 import { randomUUID } from "crypto";
@@ -92,16 +92,19 @@ export class BootstrapService implements OnApplicationBootstrap {
       return;
     }
 
-    const defaults = this.getTenantDefaults();
+    const defaults = await this.getTenantDefaultsAsync();
+    if (!defaults) {
+      return;
+    }
 
     const name = this.configService.get<string>("TENANT_MASTER_ADMIN_NAME") ?? "Admin";
     const username = this.configService.get<string>("TENANT_MASTER_ADMIN_USERNAME") ?? "";
     const password = this.configService.get<string>("TENANT_MASTER_ADMIN_PASSWORD") ?? "";
     const email = this.configService.get<string>("TENANT_MASTER_ADMIN_EMAIL") ?? "";
 
-    const tenantId =
-      this.parseUuid(this.configService.get<string>("TENANT_MASTER_ADMIN_TENANT_ID")) ??
-      defaults.tenantId;
+    const masterAdminTenantId =
+      this.parseUuid(this.configService.get<string>("TENANT_MASTER_ADMIN_TENANT_ID"));
+    const tenantId = masterAdminTenantId ?? defaults.tenantId;
     const organizationId =
       this.parseUuid(this.configService.get<string>("TENANT_MASTER_ADMIN_ORGANIZATION_ID")) ??
       defaults.organizationId;
@@ -121,23 +124,23 @@ export class BootstrapService implements OnApplicationBootstrap {
     try {
       await this.pool.query("BEGIN");
       transactionOpen = true;
-      await this.ensureTenant(tenantId, defaults.tenantName, defaults.tenantSlug);
-      await this.ensureOrganization(organizationId, tenantId, defaults.organizationName);
+      const resolvedTenantId = await this.ensureTenant(tenantId, defaults.tenantName, defaults.tenantSlug);
+      await this.ensureOrganization(organizationId, resolvedTenantId, defaults.organizationName);
       await this.ensureWorkspace(
         workspaceId,
-        tenantId,
+        resolvedTenantId,
         organizationId,
         defaults.workspaceName
       );
 
       await this.pool.query(
         "UPDATE tenants SET is_super_tenant = true, updated_at = now() WHERE id = $1",
-        [tenantId]
+        [resolvedTenantId]
       );
 
       const userExists = await this.pool.query<{ id: string }>(
         "SELECT id FROM res_users WHERE tenant_id = $1 AND LOWER(email) = LOWER($2)",
-        [tenantId, email]
+        [resolvedTenantId, email]
       );
       if ((userExists.rowCount ?? 0) > 0) {
         const userId = userExists.rows[0].id;
@@ -147,13 +150,13 @@ export class BootstrapService implements OnApplicationBootstrap {
            WHERE id = $1`,
           [userId, organizationId]
         );
-        await this.applyRoles(userId, tenantId, roleIds);
+        await this.applyRoles(userId, resolvedTenantId, roleIds);
         await this.pool.query("COMMIT");
         this.logger.log("Bootstrap admin: usuario ja existe, flags is_super_tenant/is_super_admin atualizados.");
         return;
       }
 
-      const partnerId = await this.ensurePartner(name || username || email, email, tenantId, organizationId);
+      const partnerId = await this.ensurePartner(name || username || email, email, resolvedTenantId, organizationId);
       const hashedPassword = await bcrypt.hash(password, 12);
 
       const userId = randomUUID();
@@ -161,10 +164,10 @@ export class BootstrapService implements OnApplicationBootstrap {
         `INSERT INTO res_users
          (id, tenant_id, partner_id, email, password_hash, is_active, is_super_tenant, is_super_admin, organization_id, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, TRUE, $6, now(), now())`,
-        [userId, tenantId, partnerId, email, hashedPassword, organizationId]
+        [userId, resolvedTenantId, partnerId, email, hashedPassword, organizationId]
       );
 
-      await this.applyRoles(userId, tenantId, roleIds);
+      await this.applyRoles(userId, resolvedTenantId, roleIds);
       await this.pool.query("COMMIT");
       transactionOpen = false;
 
@@ -251,18 +254,31 @@ export class BootstrapService implements OnApplicationBootstrap {
     }
   }
 
-  private async ensureTenant(tenantId: string, name: string, slug: string) {
-    const exists = await this.pool.query("SELECT id FROM tenants WHERE id = $1", [tenantId]);
-    if ((exists.rowCount ?? 0) > 0) {
-      return;
+  private async ensureTenant(tenantId: string, name: string, slug: string): Promise<string> {
+    const existsById = await this.pool.query<{ id: string }>("SELECT id FROM tenants WHERE id = $1", [
+      tenantId
+    ]);
+    if ((existsById.rowCount ?? 0) > 0) {
+      return existsById.rows[0].id;
     }
 
-    await this.pool.query(
+    const existsBySlug = await this.pool.query<{ id: string }>(
+      "SELECT id FROM tenants WHERE slug = $1",
+      [slug]
+    );
+    if ((existsBySlug.rowCount ?? 0) > 0) {
+      return existsBySlug.rows[0].id;
+    }
+
+    const result = await this.pool.query<{ id: string }>(
       `INSERT INTO tenants
        (id, name, slug, db_strategy, migration_status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), now())`,
+       VALUES ($1, $2, $3, $4, $5, now(), now())
+       ON CONFLICT (slug) DO UPDATE SET updated_at = now()
+       RETURNING id`,
       [tenantId, name, slug, "shared", "idle"]
     );
+    return result.rows[0].id;
   }
 
   private async ensureOrganization(organizationId: string, tenantId: string, name: string) {
@@ -355,14 +371,84 @@ export class BootstrapService implements OnApplicationBootstrap {
     }
   }
 
-  private getTenantDefaults() {
-    const rawTenantId = this.configService.get<string>("TENANT_DEFAULT_ID");
+  private async getTenantDefaultsAsync(): Promise<{
+    tenantId: string;
+    tenantSlug: string;
+    tenantName: string;
+    organizationId: string;
+    workspaceId: string;
+    organizationName: string;
+    workspaceName: string;
+  } | null> {
+    const defaultSlug = this.configService.get<string>("TENANT_DEFAULT_SLUG")?.trim() ?? "default-tenant";
+    const defaultName = this.configService.get<string>("TENANT_DEFAULT_NAME") ?? "Default Tenant";
+
+    const rawTenantId = this.configService.get<string>("TENANT_DEFAULT_ID")?.trim();
     const parsedTenantId = this.parseUuid(rawTenantId);
+
+    // 2 - procura por tenant_default_id OU tenant_default_slug; se encontrar algum, retorna
+    if (parsedTenantId) {
+      const byId = await this.pool.query<{ id: string; slug: string; name: string | null }>(
+        "SELECT id, slug, name FROM tenants WHERE id = $1",
+        [parsedTenantId]
+      );
+      if ((byId.rowCount ?? 0) > 0) {
+        const row = byId.rows[0];
+        return this.buildTenantDefaults(row.id, row.slug, row.name ?? defaultName);
+      }
+    }
+
+    if (defaultSlug) {
+      const bySlug = await this.pool.query<{ id: string; slug: string; name: string | null }>(
+        "SELECT id, slug, name FROM tenants WHERE slug = $1",
+        [defaultSlug]
+      );
+      if ((bySlug.rowCount ?? 0) > 0) {
+        const row = bySlug.rows[0];
+        return this.buildTenantDefaults(row.id, row.slug, row.name ?? defaultName);
+      }
+    }
+
+    // 1 - tenant_default_enabled = true E tenant_master_admin_enabled = true
+    const defaultTenantEnabled =
+      (this.configService.get<string>("TENANT_DEFAULT_ENABLED") ?? "false").toLowerCase() === "true";
+    const masterAdminEnabled =
+      (this.configService.get<string>("TENANT_MASTER_ADMIN_ENABLED") ?? "false").toLowerCase() ===
+      "true";
+    if (!defaultTenantEnabled || !masterAdminEnabled) {
+      return null;
+    }
+
+    // 3 - nao existe tenant com is_super_tenant = true (todos tem is_super_tenant = false ou nao ha tenants)
+    const superTenantExists = await this.pool.query<{ id: string }>(
+      "SELECT id FROM tenants WHERE is_super_tenant = true LIMIT 1"
+    );
+    if ((superTenantExists.rowCount ?? 0) > 0) {
+      throw new BadRequestException("Code 4: Tenant padrao invalido");
+    }
+
+    // Condicoes 1, 2 e 3 atendidas: entra no fluxo de criacao do INSERT
     const tenantId = parsedTenantId ?? randomUUID();
     if (!parsedTenantId && rawTenantId) {
       this.logger.warn(`TENANT_DEFAULT_ID invalido (${rawTenantId}); usando ${tenantId}.`);
     }
 
+    return this.buildTenantDefaults(tenantId, defaultSlug, defaultName);
+  }
+
+  private buildTenantDefaults(
+    tenantId: string,
+    tenantSlug: string,
+    tenantName: string
+  ): {
+    tenantId: string;
+    tenantSlug: string;
+    tenantName: string;
+    organizationId: string;
+    workspaceId: string;
+    organizationName: string;
+    workspaceName: string;
+  } {
     const rawOrganizationId = this.configService.get<string>("TENANT_DEFAULT_ORGANIZATION_ID");
     const parsedOrganizationId = this.parseUuid(rawOrganizationId);
     const organizationId = parsedOrganizationId ?? randomUUID();
@@ -383,10 +469,10 @@ export class BootstrapService implements OnApplicationBootstrap {
 
     return {
       tenantId,
+      tenantSlug,
+      tenantName,
       organizationId,
       workspaceId,
-      tenantSlug: this.configService.get<string>("TENANT_DEFAULT_SLUG") ?? "default-tenant",
-      tenantName: this.configService.get<string>("TENANT_DEFAULT_NAME") ?? "Default Tenant",
       organizationName:
         this.configService.get<string>("TENANT_DEFAULT_ORGANIZATION_NAME") ??
         "Default Organization",

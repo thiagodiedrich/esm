@@ -45,7 +45,7 @@ let TenantMigrationService = class TenantMigrationService {
             input.tenant_id
         ]);
         if ((result.rowCount ?? 0) === 0) {
-            throw new common_1.BadRequestException("Tenant nao encontrado.");
+            throw new common_1.BadRequestException("Code 9: Tenant nao encontrado");
         }
     }
 };

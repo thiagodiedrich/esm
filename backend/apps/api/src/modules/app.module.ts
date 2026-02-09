@@ -14,6 +14,7 @@ import { MenuController } from "./menu/menu.controller";
 import { MenuService } from "./menu/menu.service";
 import { ObservabilityModule } from "./observability/observability.module";
 import { CorrelationMiddleware } from "./observability/correlation.middleware";
+import { CorsValidationMiddleware } from "./observability/cors-validation.middleware";
 import { AuditMiddleware } from "./observability/audit.middleware";
 import { DbRouterModule } from "./db-router/db-router.module";
 import { KafkaModule } from "./kafka/kafka.module";
@@ -59,6 +60,7 @@ import { TenantService } from "./tenant/tenant.service";
     TenantController
   ],
   providers: [
+    CorsValidationMiddleware,
     {
       provide: APP_GUARD,
       useClass: AppAuthGuard
@@ -82,6 +84,8 @@ import { TenantService } from "./tenant/tenant.service";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(CorrelationMiddleware, TenancyMiddleware, AuditMiddleware).forRoutes("*");
+    consumer
+      .apply(CorsValidationMiddleware, CorrelationMiddleware, TenancyMiddleware, AuditMiddleware)
+      .forRoutes("*");
   }
 }

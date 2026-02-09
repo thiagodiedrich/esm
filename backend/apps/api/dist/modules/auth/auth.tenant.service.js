@@ -23,65 +23,112 @@ let AuthTenantService = class AuthTenantService {
         this.pool = pool;
     }
     async resolveTenantOrFail(request) {
-        const tenantHeader = (this.configService.get("TENANT_HEADER") ?? "x-tenant-id").toLowerCase();
-        const tenantIdHeader = request?.headers?.[tenantHeader];
-        if (typeof tenantIdHeader === "string" && tenantIdHeader.trim()) {
-            const result = await this.pool.query("SELECT id, slug FROM tenants WHERE id = $1", [tenantIdHeader.trim()]);
-            if (result.rowCount === 0) {
-                throw new common_1.BadRequestException("Tenant nao encontrado.");
-            }
-            return result.rows[0];
+        const multiTenantEnabled = (this.configService.get("MULTI_TENANT_ENABLED") ?? "false").toLowerCase() === "true";
+        if (multiTenantEnabled) {
+            return this.resolveMultiTenant(request);
         }
-        const tenantSlug = this.extractTenantSlug(request);
-        if (tenantSlug) {
-            const result = await this.pool.query("SELECT id, slug FROM tenants WHERE slug = $1", [tenantSlug]);
-            if (result.rowCount === 0) {
-                throw new common_1.BadRequestException("Tenant nao encontrado.");
-            }
-            return result.rows[0];
+        const defaultTenantEnabled = (this.configService.get("TENANT_DEFAULT_ENABLED") ?? "false").toLowerCase() === "true";
+        if (defaultTenantEnabled) {
+            return this.resolveDefaultTenant();
         }
-        const multiTenantEnabled = (this.configService.get("MULTI_TENANT_ENABLED") ?? "false").toLowerCase() ===
-            "true";
-        const defaultTenantEnabled = (this.configService.get("TENANT_DEFAULT_ENABLED") ?? "false").toLowerCase() ===
-            "true";
-        if (!multiTenantEnabled && defaultTenantEnabled) {
-            const defaultTenantId = this.configService.get("TENANT_DEFAULT_ID")?.trim();
-            if (!defaultTenantId) {
-                throw new common_1.BadRequestException("TENANT_DEFAULT_ID nao configurado.");
-            }
-            const result = await this.pool.query("SELECT id, slug FROM tenants WHERE id = $1", [defaultTenantId]);
-            if (result.rowCount === 0) {
-                throw new common_1.BadRequestException("Tenant nao encontrado.");
-            }
-            return result.rows[0];
-        }
-        throw new common_1.BadRequestException("Tenant nao identificado.");
+        return this.resolveTenantFromRequest(request);
     }
-    extractTenantSlug(request) {
-        const headerSlug = request?.headers["x-tenant-slug"];
-        if (typeof headerSlug === "string" && headerSlug.trim()) {
-            return headerSlug.trim();
+    async resolveMultiTenant(request) {
+        const tenantId = this.getTenantIdFromHeader(request);
+        if (tenantId) {
+            const tenant = await this.findTenantById(tenantId);
+            if (tenant)
+                return tenant;
         }
-        const hostHeader = request?.headers.host;
-        if (!hostHeader) {
+        const tenantSlug = this.getTenantSlugFromHeader(request);
+        if (tenantSlug) {
+            const tenant = await this.findTenantBySlug(tenantSlug);
+            if (tenant)
+                return tenant;
+        }
+        const hostSlug = this.extractTenantSlugFromHost(request);
+        if (hostSlug) {
+            const tenant = await this.findTenantBySlug(hostSlug);
+            if (tenant)
+                return tenant;
+        }
+        throw new common_1.BadRequestException("1 - Tenant não encontrado");
+    }
+    async resolveDefaultTenant() {
+        const defaultTenantId = this.configService.get("TENANT_DEFAULT_ID")?.trim();
+        const defaultTenantSlug = this.configService.get("TENANT_DEFAULT_SLUG")?.trim();
+        if (defaultTenantId) {
+            const tenant = await this.findTenantById(defaultTenantId);
+            if (tenant)
+                return tenant;
+        }
+        if (defaultTenantSlug) {
+            const tenant = await this.findTenantBySlug(defaultTenantSlug);
+            if (tenant)
+                return tenant;
+        }
+        throw new common_1.BadRequestException("2 - Tenant padrão não encontrado");
+    }
+    async resolveTenantFromRequest(request) {
+        const tenantId = this.getTenantIdFromHeader(request);
+        if (tenantId) {
+            const tenant = await this.findTenantById(tenantId);
+            if (tenant)
+                return tenant;
+        }
+        const tenantSlug = this.getTenantSlugFromHeader(request);
+        if (tenantSlug) {
+            const tenant = await this.findTenantBySlug(tenantSlug);
+            if (tenant)
+                return tenant;
+        }
+        const hostSlug = this.extractTenantSlugFromHost(request);
+        if (hostSlug) {
+            const tenant = await this.findTenantBySlug(hostSlug);
+            if (tenant)
+                return tenant;
+        }
+        throw new common_1.BadRequestException("3 - Tenant não encontrado");
+    }
+    getTenantIdFromHeader(request) {
+        const header = (this.configService.get("TENANT_HEADER") ?? "x-tenant-id").toLowerCase();
+        const value = request?.headers?.[header];
+        return typeof value === "string" && value.trim() ? value.trim() : undefined;
+    }
+    getTenantSlugFromHeader(request) {
+        const value = request?.headers?.["x-tenant-slug"];
+        return typeof value === "string" && value.trim() ? value.trim() : undefined;
+    }
+    extractTenantSlugFromHost(request) {
+        const hostHeader = request?.headers?.host;
+        if (!hostHeader)
             return undefined;
-        }
         const host = hostHeader.split(":")[0];
-        if (!host) {
+        if (!host)
             return undefined;
-        }
         const normalizedHost = host.trim().toLowerCase();
-        if (normalizedHost === "localhost") {
+        if (normalizedHost === "localhost")
             return undefined;
-        }
-        if (!normalizedHost.includes(".")) {
+        if (!normalizedHost.includes("."))
             return undefined;
-        }
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalizedHost)) {
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalizedHost))
             return undefined;
-        }
         const [subdomain] = host.split(".");
         return subdomain?.trim() || undefined;
+    }
+    async findTenantById(id) {
+        const result = await this.pool.query("SELECT id, slug FROM tenants WHERE id = $1", [id]);
+        return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
+    }
+    async findTenantBySlug(slug) {
+        const result = await this.pool.query("SELECT id, slug FROM tenants WHERE slug = $1", [slug]);
+        return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
+    }
+    extractTenantSlug(request) {
+        const headerSlug = this.getTenantSlugFromHeader(request);
+        if (headerSlug)
+            return headerSlug;
+        return this.extractTenantSlugFromHost(request);
     }
 };
 exports.AuthTenantService = AuthTenantService;

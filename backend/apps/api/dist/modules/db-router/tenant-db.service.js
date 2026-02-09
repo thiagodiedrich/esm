@@ -43,7 +43,7 @@ let TenantDbService = class TenantDbService {
     async getTenantErpLogicalName(tenantId) {
         const result = await this.controlPlanePool.query("SELECT erp_db FROM tenants WHERE id = $1", [tenantId]);
         if ((result.rowCount ?? 0) === 0) {
-            throw new common_1.BadRequestException("Tenant nao encontrado.");
+            throw new common_1.BadRequestException("Code 6: Tenant nao encontrado");
         }
         return result.rows[0].erp_db;
     }
