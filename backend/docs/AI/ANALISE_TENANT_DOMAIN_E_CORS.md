@@ -1,5 +1,7 @@
 # Análise: Tenant (Code 7) e CORS
 
+**Estado atual (v1.9.0):** O campo `domain` foi adicionado em `tenants` e a resolução por domain está implementada no login (`AuthTenantService`) e no `TenancyMiddleware`. O **CorsValidationMiddleware foi removido**; CORS é tratado apenas no hook `onRequest` em `main.ts` e no `ServiceExceptionFilter` para erros. Ver `docs/AI/CORS_ESTRATEGIA.md` e `docs/AI/LOGIN_E_RESOLUCAO_TENANT.md`.
+
 ## Resumo executivo
 
 Há dois problemas distintos:

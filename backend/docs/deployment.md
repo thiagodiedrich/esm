@@ -1,5 +1,7 @@
 # Deployment
 
+**Backend API ESM — versão estável 1.9.0**
+
 ## Status
 Em definicao. Apenas fluxo local foi validado.
 

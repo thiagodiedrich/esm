@@ -2,6 +2,22 @@
 
 Todas as mudancas relevantes deste projeto serao documentadas aqui.
 
+## v1.9.0 - 2026-02-10 (estável)
+
+### Adicionado
+- Campo `domain` na tabela `tenants` (lista de domínios separados por vírgula) e resolução de tenant por domain no login e no TenancyMiddleware.
+- Variável `TENANT_DEFAULT_DOMAIN` no `.env`: usada ao criar o tenant padrão no bootstrap e para popular o tenant principal (migration `2026020310__tenants_domain.sql`).
+- Headers CORS em respostas de erro (4xx/5xx) via ServiceExceptionFilter, para o browser expor o body quando a API retorna erro.
+- Documentação: `docs/AI/LOGIN_E_RESOLUCAO_TENANT.md`, `docs/AI/CORS_ESTRATEGIA.md`.
+
+### Ajustado
+- **CORS simplificado:** CORS tratado apenas no hook Fastify `onRequest` em `main.ts` e no ServiceExceptionFilter para erros. **CorsValidationMiddleware removido** da cadeia (evita 500 atrás de gateway e bloqueios por "Code 0").
+- Login e TenancyMiddleware: ordem de resolução de tenant passa a incluir **domain** (host completo, hostname e subdomain comparados com `tenants.domain`).
+- Frontend: mensagem "erro de comunicação" apenas quando não há resposta da API (rede/timeout); 400/500 com body exibem a mensagem da API.
+
+### Observacoes
+- Esta versão é estável. CORS atrás de proxy: se os headers não chegarem ao browser, configurar CORS no edge (ex.: Cloudflare Transform Rules).
+
 ## v1.7.0 - 2026-02-04
 
 ### Adicionado

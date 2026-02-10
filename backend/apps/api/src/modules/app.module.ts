@@ -14,7 +14,6 @@ import { MenuController } from "./menu/menu.controller";
 import { MenuService } from "./menu/menu.service";
 import { ObservabilityModule } from "./observability/observability.module";
 import { CorrelationMiddleware } from "./observability/correlation.middleware";
-import { CorsValidationMiddleware } from "./observability/cors-validation.middleware";
 import { AuditMiddleware } from "./observability/audit.middleware";
 import { DbRouterModule } from "./db-router/db-router.module";
 import { KafkaModule } from "./kafka/kafka.module";
@@ -62,7 +61,6 @@ import { WebhookIncomingModule } from "./webhooks-incoming/webhook-incoming.modu
     TenantController
   ],
   providers: [
-    CorsValidationMiddleware,
     {
       provide: APP_GUARD,
       useClass: AppAuthGuard
@@ -104,7 +102,6 @@ export class AppModule implements NestModule {
     }
 
     const chain = consumer.apply(
-      CorsValidationMiddleware,
       CorrelationMiddleware,
       TenancyMiddleware,
       AuditMiddleware

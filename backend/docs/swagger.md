@@ -1,5 +1,7 @@
 # Swagger, uso e rotas da API
 
+**Backend API ESM — versão estável 1.9.0**
+
 Este documento descreve como acessar o Swagger, autenticar e chamar os endpoints
 expostos pelo backend.
 
@@ -23,13 +25,16 @@ Os headers seguem o padrão:
 
 ## Resolução de tenant (login)
 
-No login (`/api/v1/auth/login`), o tenant é resolvido nesta ordem:
+No login (`/api/v1/auth/login`), o tenant é resolvido nesta ordem (quando o request é usado):
 
-1) `x-tenant-id` (header definido por `TENANT_HEADER`)
-2) `x-tenant-slug` ou subdomínio (ex.: `tenant.dominio.com`)
-3) Se `MULTI_TENANT_ENABLED=false` e `TENANT_DEFAULT_ENABLED=true`, usa `TENANT_DEFAULT_ID`
+1) **tenant_id** — header `x-tenant-id` (ou `TENANT_HEADER`): compara com `tenants.id` (numérico) ou `tenants.uuid`
+2) **tenant_slug** — header `x-tenant-slug`: compara com `tenants.slug`
+3) **subdomínio** — extraído do `Host` (ex.: `easytest` de `easytest.simc.com.br`), comparado com `tenants.slug`
+4) **domain** — host completo (com porta), hostname (sem porta) e subdomínio comparados com o campo `tenants.domain` (lista separada por vírgula, ex.: `localhost,easytest.simc.com.br`)
 
-Observação: `localhost`, IP e host sem ponto não são tratados como slug.
+**Exceção:** Se `MULTI_TENANT_ENABLED=false` e `TENANT_DEFAULT_ENABLED=true`, o login ignora headers/host e usa apenas `TENANT_DEFAULT_ID` e `TENANT_DEFAULT_SLUG` do `.env`.
+
+Detalhes: `docs/AI/LOGIN_E_RESOLUCAO_TENANT.md`.
 
 ---
 
@@ -410,6 +415,18 @@ Regras:
 - Bucket fixo (usa `MINIO_BUCKET`).
 - Rate-limit opcional (`STORAGE_DOWNLOAD_RATE_LIMIT_PER_MINUTE`).
 - Key deve estar no escopo do tenant (`telemetry/<tenant>/...`).
+
+---
+
+## Postman
+
+Collection completa e atualizada: **`docs/postman/ESM-API.postman_collection.json`**.
+
+- **Variáveis:** `base_url` (ex.: `http://localhost:3000`), `tenant_slug` (ex.: `default-tenant`), `access_token`, `refresh_token`, `correlation_id`.
+- **Auth:** A collection usa Bearer token nas variáveis; Login e Refresh preenchem `access_token` e `refresh_token` automaticamente (scripts de teste).
+- **Pastas:** Health, Auth, Context, Menu, Branding, Telemetry, Webhooks, Tenant (CRUD: organizations, workspaces, users, partners, roles), Admin (tenants, plans, platform-products, permissions), Internal (service token).
+
+Importe o arquivo no Postman: File → Import → Upload Files.
 
 ---
 

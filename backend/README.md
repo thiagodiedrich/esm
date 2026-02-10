@@ -1,6 +1,8 @@
-# esm
+# esm (backend)
 
-Versao: v1.7.0
+**Versão estável: v1.9.0**
+
+Backend da API ESM: NestJS + Fastify, multi-tenant, autenticação JWT, CORS e resolução de tenant por slug/domain.
 
 ## Fase 0 — Stack (NestJS + Fastify)
 
@@ -34,3 +36,11 @@ Estrutura de monorepo criada conforme o padrao:
 
 - `npm run build:api`
 - `npm run start:api`
+
+## Documentação
+
+- **Rotas e Swagger:** `docs/swagger.md`
+- **Resolução de tenant no login:** `docs/AI/LOGIN_E_RESOLUCAO_TENANT.md` (ordem: tenant_id → tenant_slug → subdomain → domain)
+- **CORS:** `docs/AI/CORS_ESTRATEGIA.md` (tratamento único em `main.ts`; sem middleware de validação)
+- **Changelog:** `docs/CHANGELOG.md`
+- **Postman:** `docs/postman/ESM-API.postman_collection.json` — collection completa (Health, Auth, Context, Menu, Tenant CRUD, Admin, Internal)

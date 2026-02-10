@@ -1,5 +1,7 @@
 # Login e resolução de tenant
 
+**Backend API ESM v1.9.0**
+
 ## Onde o tenant é resolvido no login
 
 O login (`POST /api/v1/auth/login`) usa **só** o `AuthTenantService.resolveTenantOrFail(request)`.  

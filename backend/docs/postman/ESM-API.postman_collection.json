@@ -1,0 +1,1095 @@
+{
+  "info": {
+    "name": "ESM API",
+    "description": "Backend API ESM — versão estável 1.9.0\n\nTenant: use X-Tenant-Slug (ex.: default-tenant) ou X-Tenant-Id. Resolução: tenant_id → tenant_slug → subdomain → domain.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "esm-backend"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" },
+    { "key": "tenant_slug", "value": "default-tenant" },
+    { "key": "correlation_id", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health (simples)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "Healthcheck simples. Retorna { \"status\": \"ok\" }"
+          }
+        },
+        {
+          "name": "Health (detalhado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "url": "{{base_url}}/api/v1/health/detailed",
+            "description": "Healthcheck com Postgres, Kafka, MinIO, Redis"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.access_token) pm.collectionVariables.set('access_token', body.access_token);",
+                  "  if (body.refresh_token) pm.collectionVariables.set('refresh_token', body.refresh_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@empresa.com\",\n  \"password\": \"senhaSegura123\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "Login. Tenant: x-tenant-id → x-tenant-slug → subdomain → domain. Salva access_token e refresh_token nas variáveis da collection."
+          }
+        },
+        {
+          "name": "Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.access_token) pm.collectionVariables.set('access_token', body.access_token);",
+                  "  if (body.refresh_token) pm.collectionVariables.set('refresh_token', body.refresh_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/auth/refresh",
+            "description": "Refresh de token. Atualiza access_token e refresh_token nas variáveis."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": "Logout. Invalida sessão."
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": "Dados do usuário logado (user_id, email, tenant_id, tenant_slug, organizations, current_context, etc.)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Context",
+      "item": [
+        {
+          "name": "Switch (troca org/workspace)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization_id\": \"uuid-da-organizacao\",\n  \"workspace_id\": \"uuid-do-workspace\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/context/switch",
+            "description": "Troca organização/workspace. Retorna novos tokens."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Menu",
+      "item": [
+        {
+          "name": "Menu (itens do usuário)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "url": "{{base_url}}/api/v1/menu",
+            "description": "Itens de menu baseados em permissões do usuário."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Branding",
+      "item": [
+        {
+          "name": "Branding defaults",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Correlation-Id", "value": "{{correlation_id}}" }],
+            "url": "{{base_url}}/api/branding/defaults",
+            "description": "Valores padrão de branding (white-label)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Telemetry",
+      "item": [
+        {
+          "name": "Telemetry bulk",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metadata\": { \"device_id\": \"abc\" },\n  \"items\": [ { \"temp\": 23.1 } ]\n}"
+            },
+            "url": "{{base_url}}/api/v1/telemetry/bulk",
+            "description": "Envia telemetria em lote. Payload comprimido e publicado no Kafka."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Webhook incoming (POST)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Webhook-Source", "value": "external" },
+              { "key": "X-Idempotency-Key", "value": "opcional" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"order.created\",\n  \"data\": {}\n}"
+            },
+            "url": "{{base_url}}/api/v1/webhooks/incoming",
+            "description": "Recebe webhook externo. Se WEBHOOK_INCOMING_SECRET estiver definido, use Authorization: Bearer <secret>."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tenant (CRUD)",
+      "item": [
+        {
+          "name": "Organizations",
+          "item": [
+            {
+              "name": "Listar organizações",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/organizations"
+              }
+            },
+            {
+              "name": "Criar organização",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Organização Principal\",\n  \"is_default\": true\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/organizations"
+              }
+            },
+            {
+              "name": "Atualizar organização",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Organização Principal\",\n  \"is_default\": true\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/organizations/:id"
+              }
+            },
+            {
+              "name": "Excluir organização",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/organizations/:id"
+              }
+            },
+            {
+              "name": "Settings da organização",
+              "item": [
+                {
+                  "name": "GET settings",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "url": "{{base_url}}/api/v1/tenant/organizations/:id/settings"
+                  }
+                },
+                {
+                  "name": "PUT settings",
+                  "request": {
+                    "method": "PUT",
+                    "header": [
+                      { "key": "Content-Type", "value": "application/json" },
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"workspace_mode\": null,\n  \"remember_last_context\": true,\n  \"menu_cache_ttl\": null,\n  \"enable_mfa\": false,\n  \"enable_oauth\": false\n}"
+                    },
+                    "url": "{{base_url}}/api/v1/tenant/organizations/:id/settings"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Workspaces",
+          "item": [
+            {
+              "name": "Listar workspaces",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/workspaces"
+              }
+            },
+            {
+              "name": "Criar workspace",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"organization_id\": \"uuid\",\n  \"name\": \"Workspace Vendas\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/workspaces"
+              }
+            },
+            {
+              "name": "Atualizar workspace",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"organization_id\": \"uuid\",\n  \"name\": \"Workspace Vendas\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/workspaces/:id"
+              }
+            },
+            {
+              "name": "Excluir workspace",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/workspaces/:id"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Users",
+          "item": [
+            {
+              "name": "Listar usuários",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/users"
+              }
+            },
+            {
+              "name": "Criar usuário",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"usuario@empresa.com\",\n  \"password\": \"senhaSegura123\",\n  \"partner_id\": null,\n  \"organization_id\": null,\n  \"is_active\": true\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/users"
+              }
+            },
+            {
+              "name": "Atualizar usuário",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"usuario@empresa.com\",\n  \"partner_id\": null,\n  \"organization_id\": null,\n  \"is_active\": true\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/users/:id"
+              }
+            },
+            {
+              "name": "Excluir usuário",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/users/:id"
+              }
+            },
+            {
+              "name": "Alterar senha (PATCH)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"password\": \"novaSenhaSegura123\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/users/:id/password"
+              }
+            },
+            {
+              "name": "Alterar status (PATCH)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"is_active\": false\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/users/:id/status"
+              }
+            },
+            {
+              "name": "Roles do usuário",
+              "item": [
+                {
+                  "name": "GET roles",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "url": "{{base_url}}/api/v1/tenant/users/:id/roles"
+                  }
+                },
+                {
+                  "name": "POST role",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      { "key": "Content-Type", "value": "application/json" },
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"role_id\": \"uuid\",\n  \"scope_type\": null,\n  \"scope_id\": null\n}"
+                    },
+                    "url": "{{base_url}}/api/v1/tenant/users/:id/roles"
+                  }
+                },
+                {
+                  "name": "DELETE role",
+                  "request": {
+                    "method": "DELETE",
+                    "header": [
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "url": "{{base_url}}/api/v1/tenant/users/:userId/roles/:roleId"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Permission overrides",
+              "item": [
+                {
+                  "name": "GET overrides",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "url": "{{base_url}}/api/v1/tenant/users/:id/permission-overrides"
+                  }
+                },
+                {
+                  "name": "POST override",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      { "key": "Content-Type", "value": "application/json" },
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"permission_id\": \"uuid\",\n  \"effect\": \"allow\"\n}"
+                    },
+                    "url": "{{base_url}}/api/v1/tenant/users/:id/permission-overrides"
+                  }
+                },
+                {
+                  "name": "DELETE override",
+                  "request": {
+                    "method": "DELETE",
+                    "header": [
+                      { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                      { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                    ],
+                    "url": "{{base_url}}/api/v1/tenant/users/:userId/permission-overrides/:permissionId"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Partners",
+          "item": [
+            {
+              "name": "Listar partners",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/partners"
+              }
+            },
+            {
+              "name": "Criar partner",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"organization_id\": null,\n  \"name\": \"João Silva\",\n  \"email\": null,\n  \"telephone\": null,\n  \"type\": null,\n  \"document\": null,\n  \"location_address\": null,\n  \"location_address_number\": null,\n  \"location_address_zip\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/partners"
+              }
+            },
+            {
+              "name": "GET partner",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/partners/:id"
+              }
+            },
+            {
+              "name": "Atualizar partner",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"organization_id\": null,\n  \"name\": \"João Silva\",\n  \"email\": null,\n  \"telephone\": null,\n  \"type\": null,\n  \"document\": null,\n  \"location_address\": null,\n  \"location_address_number\": null,\n  \"location_address_zip\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/partners/:id"
+              }
+            },
+            {
+              "name": "Excluir partner",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/partners/:id"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Roles",
+          "item": [
+            {
+              "name": "Listar roles",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/roles"
+              }
+            },
+            {
+              "name": "Criar role",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Vendedor\",\n  \"description\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/roles"
+              }
+            },
+            {
+              "name": "GET role",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/roles/:id"
+              }
+            },
+            {
+              "name": "Atualizar role",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Vendedor\",\n  \"description\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/tenant/roles/:id"
+              }
+            },
+            {
+              "name": "Excluir role",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/tenant/roles/:id"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Requer userAuth com perfil admin. Base: /api/v1/admin",
+      "item": [
+        {
+          "name": "Tenants",
+          "item": [
+            {
+              "name": "Listar tenants",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/tenants"
+              }
+            },
+            {
+              "name": "Criar tenant",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Empresa ABC\",\n  \"slug\": \"empresa-abc\",\n  \"db_strategy\": \"shared\",\n  \"control_plane_db\": null,\n  \"erp_db\": null,\n  \"telemetry_db\": null,\n  \"migration_status\": \"pending\",\n  \"domain\": \"localhost,empresa-abc.exemplo.com\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/tenants"
+              }
+            },
+            {
+              "name": "GET tenant",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/tenants/:id"
+              }
+            },
+            {
+              "name": "Atualizar tenant",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Empresa ABC\",\n  \"slug\": \"empresa-abc\",\n  \"db_strategy\": \"shared\",\n  \"domain\": \"localhost,empresa-abc.exemplo.com\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/tenants/:id"
+              }
+            },
+            {
+              "name": "PATCH status tenant",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"migration_status\": \"completed\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/tenants/:id/status"
+              }
+            },
+            {
+              "name": "Usage metrics do tenant",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/tenants/:id/usage-metrics"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Plans",
+          "item": [
+            {
+              "name": "Listar planos",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/plans"
+              }
+            },
+            {
+              "name": "Criar plano",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"starter\",\n  \"name\": \"Plano Starter\",\n  \"description\": \"Para pequenos projetos\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/plans"
+              }
+            },
+            {
+              "name": "Atualizar plano",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"starter\",\n  \"name\": \"Plano Starter\",\n  \"description\": \"Para pequenos projetos\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/plans/:code"
+              }
+            },
+            {
+              "name": "PATCH status plano",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"active\"\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/plans/:code/status"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Platform Products",
+          "item": [
+            {
+              "name": "Listar produtos",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/platform-products"
+              }
+            },
+            {
+              "name": "Criar produto",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"erp\",\n  \"name\": \"ERP\",\n  \"description\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/platform-products"
+              }
+            },
+            {
+              "name": "GET produto",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/platform-products/:id"
+              }
+            },
+            {
+              "name": "Atualizar produto",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"erp\",\n  \"name\": \"ERP\",\n  \"description\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/platform-products/:id"
+              }
+            },
+            {
+              "name": "Excluir produto",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/platform-products/:id"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Permissions",
+          "item": [
+            {
+              "name": "Listar permissões",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/permissions"
+              }
+            },
+            {
+              "name": "Criar permissão",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resource\": \"admin.tenant\",\n  \"action\": \"read\",\n  \"description\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/permissions"
+              }
+            },
+            {
+              "name": "GET permissão",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/permissions/:id"
+              }
+            },
+            {
+              "name": "Atualizar permissão",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resource\": \"admin.tenant\",\n  \"action\": \"read\",\n  \"description\": null\n}"
+                },
+                "url": "{{base_url}}/api/v1/admin/permissions/:id"
+              }
+            },
+            {
+              "name": "Excluir permissão",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "X-Tenant-Slug", "value": "{{tenant_slug}}" },
+                  { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+                ],
+                "url": "{{base_url}}/api/v1/admin/permissions/:id"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Internal (service token)",
+      "description": "Requer serviceAuth (JWT de serviço). Não use user token.",
+      "item": [
+        {
+          "name": "Usage metrics (POST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metrics\": [\n    {\n      \"tenant_id\": \"uuid\",\n      \"metric_key\": \"api.requests\",\n      \"metric_value\": 1,\n      \"period\": \"2026-02-03\",\n      \"source\": \"gateway\"\n    }\n  ]\n}"
+            },
+            "url": "{{base_url}}/internal/usage/metrics",
+            "description": "Registra métricas de uso. Requer service token."
+          }
+        },
+        {
+          "name": "Tenant migration pointer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"uuid\",\n  \"db_strategy\": \"shared\",\n  \"control_plane_db\": null,\n  \"erp_db\": \"ERP_MAIN\",\n  \"telemetry_db\": \"TEL_MAIN\",\n  \"migration_status\": \"idle\"\n}"
+            },
+            "url": "{{base_url}}/internal/tenants/migration/pointer",
+            "description": "Atualiza ponteiro de migração do tenant. Requer service token."
+          }
+        },
+        {
+          "name": "Storage - Gravar payload",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Correlation-Id", "value": "{{correlation_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"telemetry/tenant-uuid/2026-02-10/event.json.gz\",\n  \"payload\": \"base64-encoded-content\"\n}"
+            },
+            "url": "{{base_url}}/internal/storage/payloads",
+            "description": "Grava payload no bucket (MinIO). Key deve estar no escopo do tenant. Requer service token."
+          }
+        },
+        {
+          "name": "Storage - Download payload",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Correlation-Id", "value": "{{correlation_id}}" }],
+            "url": "{{base_url}}/internal/storage/payloads/:key",
+            "description": "Download de payload por key. Requer service token."
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "var cid = pm.collectionVariables.get('correlation_id');",
+          "if (!cid || cid === '') {",
+          "  var u = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });",
+          "  pm.collectionVariables.set('correlation_id', u);",
+          "}"
+        ]
+      }
+    }
+  ]
+}
