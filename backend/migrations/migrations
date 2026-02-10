@@ -11,3 +11,5 @@ migrations/control-plane/2026020303__res_menus_and_permissions_seed.sql
 migrations/control-plane/2026020304__res_role_permissions.sql
 migrations/control-plane/2026020305__super_tenant_and_super_admin.sql
 migrations/control-plane/2026020306__unique_constraints_validations.sql
+migrations/control-plane/2026020307__webhook_incoming_events.sql
+migrations/control-plane/2026020310__tenants_domain.sql

@@ -1,9 +1,12 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { FastifyReply, FastifyRequest } from "fastify";
 
 @Catch()
 export class ServiceExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(ServiceExceptionFilter.name);
+
+  constructor(private readonly configService: ConfigService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -13,7 +16,7 @@ export class ServiceExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();
-      return this.sendResponse(response, status, body);
+      return this.sendResponse(response, request, status, body);
     }
 
     const isDatabaseError = this.isDatabaseError(exception);
@@ -24,7 +27,7 @@ export class ServiceExceptionFilter implements ExceptionFilter {
 
     this.logger.error(message, (exception as Error)?.stack);
 
-    return this.sendResponse(response, statusCode, {
+    return this.sendResponse(response, request, statusCode, {
       statusCode,
       message,
       error: isDatabaseError ? "DatabaseUnavailable" : "ServiceUnavailable",
@@ -33,11 +36,39 @@ export class ServiceExceptionFilter implements ExceptionFilter {
     });
   }
 
+  private setCorsHeadersIfAllowed(reply: FastifyReply, request: FastifyRequest): void {
+    const origin = request.headers?.origin;
+    if (typeof origin !== "string" || !origin.trim()) return;
+    const raw = this.configService.get<string>("CORS_ORIGINS")?.trim();
+    if (!raw) return;
+    const allowed = raw.split(",").map((o) => o.trim().toLowerCase()).filter(Boolean);
+    if (!allowed.includes(origin.trim().toLowerCase())) return;
+
+    const value = origin.trim();
+    const res = reply as unknown as {
+      header?: (name: string, value: string) => unknown;
+      raw?: { setHeader?: (name: string, value: string) => void };
+      setHeader?: (name: string, value: string) => void;
+    };
+    if (typeof res.header === "function") {
+      res.header("Access-Control-Allow-Origin", value);
+      res.header("Access-Control-Allow-Credentials", "true");
+    } else if (typeof res.raw?.setHeader === "function") {
+      res.raw.setHeader("Access-Control-Allow-Origin", value);
+      res.raw.setHeader("Access-Control-Allow-Credentials", "true");
+    } else if (typeof res.setHeader === "function") {
+      res.setHeader("Access-Control-Allow-Origin", value);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+  }
+
   private sendResponse(
     response: FastifyReply,
+    request: FastifyRequest,
     statusCode: number,
     body: unknown
   ) {
+    this.setCorsHeadersIfAllowed(response, request);
     const reply = response as unknown as {
       status?: (code: number) => { send: (payload: unknown) => unknown };
       send?: (payload: unknown) => unknown;

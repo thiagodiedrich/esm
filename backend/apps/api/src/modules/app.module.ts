@@ -34,6 +34,7 @@ import { AdminController } from "./admin/admin.controller";
 import { AdminService } from "./admin/admin.service";
 import { TenantController } from "./tenant/tenant.controller";
 import { TenantService } from "./tenant/tenant.service";
+import { WebhookIncomingModule } from "./webhooks-incoming/webhook-incoming.module";
 
 @Module({
   imports: [
@@ -44,7 +45,8 @@ import { TenantService } from "./tenant/tenant.service";
     DbRouterModule,
     ObservabilityModule,
     KafkaModule,
-    AuthModule
+    AuthModule,
+    WebhookIncomingModule
   ],
   controllers: [
     AppController,

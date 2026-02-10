@@ -54,6 +54,12 @@ export class AuthTenantService {
       if (tenant) return tenant;
     }
 
+    const hostCandidates = this.getHostCandidatesForDomain(request);
+    if (hostCandidates?.length) {
+      const tenant = await this.findTenantByDomain(hostCandidates);
+      if (tenant) return tenant;
+    }
+
     throw new BadRequestException("Code 1: Tenant não encontrado");
   }
 
@@ -90,6 +96,12 @@ export class AuthTenantService {
     const hostSlug = this.extractTenantSlugFromHost(request);
     if (hostSlug) {
       const tenant = await this.findTenantBySlug(hostSlug);
+      if (tenant) return tenant;
+    }
+
+    const hostCandidates = this.getHostCandidatesForDomain(request);
+    if (hostCandidates?.length) {
+      const tenant = await this.findTenantByDomain(hostCandidates);
       if (tenant) return tenant;
     }
 
@@ -141,6 +153,40 @@ export class AuthTenantService {
       [slug]
     );
     return result.rowCount && result.rowCount > 0 ? result.rows[0] : null;
+  }
+
+  /** Candidatos para match por domain: host completo (com porta), hostname (sem porta), subdominio se houver. */
+  private getHostCandidatesForDomain(request?: FastifyRequest): string[] | undefined {
+    const hostHeader = request?.headers?.host;
+    if (!hostHeader || typeof hostHeader !== "string") return undefined;
+    const raw = hostHeader.trim();
+    if (!raw) return undefined;
+    const hostname = raw.split(":")[0].trim();
+    const parts = hostname.split(".");
+    const subdomain = parts.length > 1 ? parts[0].trim() : undefined;
+    const candidates = [raw, hostname];
+    if (subdomain && !candidates.includes(subdomain)) candidates.push(subdomain);
+    return candidates.length > 0 ? candidates : undefined;
+  }
+
+  /** Busca tenant cujo campo domain (lista separada por virgula) contem um dos candidatos. */
+  private async findTenantByDomain(hostCandidates: string[]): Promise<TenantRecord | null> {
+    for (const candidate of hostCandidates) {
+      const normalized = candidate.toLowerCase().trim();
+      if (!normalized) continue;
+      const result = await this.pool.query<{ id: number; uuid: string; slug: string }>(
+        `SELECT id, uuid, slug FROM tenants
+         WHERE domain IS NOT NULL AND domain != ''
+         AND EXISTS (
+           SELECT 1 FROM unnest(string_to_array(trim(domain), ',')) AS d(v)
+           WHERE lower(trim(d.v)) = $1
+         )
+         LIMIT 1`,
+        [normalized]
+      );
+      if (result.rowCount && result.rowCount > 0) return result.rows[0];
+    }
+    return null;
   }
 
   extractTenantSlug(request?: FastifyRequest): string | undefined {

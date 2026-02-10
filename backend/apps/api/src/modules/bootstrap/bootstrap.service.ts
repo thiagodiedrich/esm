@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, OnApplicationBootstrap
 import { ConfigService } from "@nestjs/config";
 import { Pool } from "pg";
 import { randomUUID } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { resolveUuidToId } from "../database/uuid-resolver";
 import { BrandingService } from "../branding/branding.service";
 import { StorageService } from "../storage/storage.service";
@@ -301,13 +301,17 @@ export class BootstrapService implements OnApplicationBootstrap {
       return { id: existsBySlug.rows[0].id, created: false };
     }
 
+    const defaultDomain =
+      this.configService.get<string>("TENANT_DEFAULT_DOMAIN")?.trim() ||
+      undefined;
+
     const result = await this.pool.query<{ id: number }>(
       `INSERT INTO tenants
-       (name, slug, db_strategy, migration_status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, now(), now())
+       (name, slug, db_strategy, migration_status, domain, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), now())
        ON CONFLICT (slug) DO UPDATE SET updated_at = now()
        RETURNING id`,
-      [name, slug, "shared", "idle"]
+      [name, slug, "shared", "idle", defaultDomain ?? null]
     );
     return { id: result.rows[0].id, created: true };
   }

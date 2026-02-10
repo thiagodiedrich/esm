@@ -6,7 +6,7 @@ import { FastifyRequest, FastifyReply } from "fastify";
 export class CorsValidationMiddleware implements NestMiddleware {
   constructor(private readonly configService: ConfigService) {}
 
-  use(req: FastifyRequest, res: FastifyReply, next: () => void) {
+  use(req: FastifyRequest, res: FastifyReply, next: () => void): void {
     if (this.isPreflight(req)) {
       this.sendPreflightResponse(req, res);
       return;
@@ -50,8 +50,29 @@ export class CorsValidationMiddleware implements NestMiddleware {
   }
 
   /**
-   * Responde ao preflight OPTIONS com 204 e headers CORS, para o browser
-   * aceitar o request real (POST login). Assim o OPTIONS nao passa pelo Tenancy.
+   * Define header na resposta usando a API disponivel (Fastify reply ou Node raw).
+   */
+  private setHeader(
+    res: FastifyReply,
+    name: string,
+    value: string
+  ): void {
+    const r = res as unknown as {
+      header?: (n: string, v: string) => unknown;
+      raw?: { setHeader?: (n: string, v: string) => void };
+      setHeader?: (n: string, v: string) => void;
+    };
+    if (typeof r.header === "function") {
+      r.header(name, value);
+    } else if (typeof r.raw?.setHeader === "function") {
+      r.raw.setHeader(name, value);
+    } else if (typeof r.setHeader === "function") {
+      r.setHeader(name, value);
+    }
+  }
+
+  /**
+   * Responde ao preflight OPTIONS com 204 e headers CORS (fallback se o hook em main.ts nao rodar).
    */
   private sendPreflightResponse(req: FastifyRequest, res: FastifyReply): void {
     const origin = req.headers.origin;
@@ -65,16 +86,33 @@ export class CorsValidationMiddleware implements NestMiddleware {
       allowedOrigins.some((o) => o === origin.trim().toLowerCase());
 
     if (originAllowed) {
-      res.header("Access-Control-Allow-Origin", origin.trim());
-      res.header("Access-Control-Allow-Credentials", "true");
+      this.setHeader(res, "Access-Control-Allow-Origin", origin.trim());
+      this.setHeader(res, "Access-Control-Allow-Credentials", "true");
     }
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.header(
+    this.setHeader(res, "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    this.setHeader(
+      res,
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization, X-Tenant-Id, X-Organization-Id, X-Workspace-Id, X-Tenant-Slug, X-Correlation-Id"
     );
-    res.header("Access-Control-Max-Age", "86400");
-    res.status(204).send();
+    this.setHeader(res, "Access-Control-Max-Age", "86400");
+
+    const reply = res as unknown as {
+      status?: (code: number) => { send?: (payload?: unknown) => unknown };
+      send?: (payload?: unknown) => unknown;
+      raw?: { statusCode?: number; end?: (payload?: string) => void };
+    };
+    if (typeof reply.status === "function") {
+      const sent = reply.status(204);
+      if (typeof (sent as { send?: (p?: unknown) => unknown }).send === "function") {
+        (sent as { send: (p?: unknown) => unknown }).send();
+      }
+    } else if (typeof reply.send === "function") {
+      reply.send();
+    } else if (reply.raw) {
+      reply.raw.statusCode = 204;
+      reply.raw.end?.();
+    }
   }
 
   private isPublicRoute(req: FastifyRequest): boolean {

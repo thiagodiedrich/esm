@@ -35,7 +35,7 @@ async function bootstrap() {
       : "log";
   const level = debugEnabled && normalizedLevel === "log" ? "debug" : normalizedLevel;
   app.useLogger(new JsonLoggerService(requestContext, serviceName, { level, format }));
-  app.useGlobalFilters(new ServiceExceptionFilter());
+  app.useGlobalFilters(new ServiceExceptionFilter(config));
   const port = Number(config.get("PORT")) || 3000;
   const host = config.get<string>("HOST") || "0.0.0.0";
 
@@ -45,9 +45,49 @@ async function bootstrap() {
 
   if (corsOriginsRaw) {
     const origins = corsOriginsRaw.split(",").map((origin) => origin.trim()).filter(Boolean);
+    const originsLower = origins.map((o) => o.trim().toLowerCase()).filter(Boolean);
     app.enableCors({
       origin: origins.length > 0 ? origins : false,
       credentials: true
+    });
+
+    const setCorsHeader = (reply: any, name: string, value: string) => {
+      if (typeof reply?.header === "function") {
+        reply.header(name, value);
+      } else if (typeof reply?.raw?.setHeader === "function") {
+        reply.raw.setHeader(name, value);
+      } else if (typeof reply?.setHeader === "function") {
+        reply.setHeader(name, value);
+      }
+    };
+
+    const fastify = app.getHttpAdapter().getInstance() as {
+      addHook: (name: string, fn: (...args: any[]) => void | Promise<void>) => void;
+    };
+
+    // CORS: definir no inicio de TODA requisicao para a resposta final ter os headers (funciona atras de proxy/gateway)
+    fastify.addHook("onRequest", async (request: any, reply: any) => {
+      const origin = request.headers?.origin;
+      const originAllowed =
+        typeof origin === "string" &&
+        origin.trim() &&
+        originsLower.some((o: string) => o === origin.trim().toLowerCase());
+
+      if (originAllowed) {
+        setCorsHeader(reply, "Access-Control-Allow-Origin", origin.trim());
+        setCorsHeader(reply, "Access-Control-Allow-Credentials", "true");
+      }
+      setCorsHeader(reply, "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      setCorsHeader(
+        reply,
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-Tenant-Id, X-Organization-Id, X-Workspace-Id, X-Tenant-Slug, X-Correlation-Id"
+      );
+      setCorsHeader(reply, "Access-Control-Max-Age", "86400");
+
+      if (String(request.method).toUpperCase() === "OPTIONS") {
+        return reply.status(204).send();
+      }
     });
   } else {
     const bootstrapLogger = new Logger("Bootstrap");
@@ -101,6 +141,15 @@ async function bootstrap() {
       .addBearerAuth(
         { type: "http", scheme: "bearer", bearerFormat: "JWT" },
         "serviceAuth"
+      )
+      .addBearerAuth(
+        {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "Secret",
+          description: "Opcional: valor de WEBHOOK_INCOMING_SECRET (se configurado no servidor)"
+        },
+        "webhookAuth"
       );
 
     const serverUrl = config.get<string>("SWAGGER_SERVER_URL");

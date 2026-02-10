@@ -84,15 +84,50 @@ export class TenancyMiddleware implements NestMiddleware {
 
     const tenantSlugHeader = this.getHeaderValue(req, "x-tenant-slug");
     const hostTenantSlug = this.extractTenantFromHost(req);
+    const hostForDomain = this.getHostForDomain(req);
+
+    let tenantResolved = false;
 
     if (tenantSlugHeader) {
-      await this.ensureTenantExists(tenantSlugHeader, "slug");
+      try {
+        await this.ensureTenantExists(tenantSlugHeader, "slug");
+        tenantResolved = true;
+      } catch {
+        if (hostForDomain) {
+          try {
+            await this.ensureTenantByDomain(hostForDomain);
+            tenantResolved = true;
+          } catch {
+            throw new BadRequestException("Code 7: Tenant nao encontrado");
+          }
+        } else {
+          throw new BadRequestException("Code 7: Tenant nao encontrado");
+        }
+      }
     }
-    if (hostTenantSlug) {
-      await this.ensureTenantExists(hostTenantSlug, "slug");
+    if (!tenantResolved && hostTenantSlug) {
+      try {
+        await this.ensureTenantExists(hostTenantSlug, "slug");
+        tenantResolved = true;
+      } catch {
+        if (hostForDomain) {
+          try {
+            await this.ensureTenantByDomain(hostForDomain);
+            tenantResolved = true;
+          } catch {
+            throw new BadRequestException("Code 7: Tenant nao encontrado");
+          }
+        } else {
+          throw new BadRequestException("Code 7: Tenant nao encontrado");
+        }
+      }
+    }
+    if (!tenantResolved && hostForDomain?.length) {
+      await this.ensureTenantByDomain(hostForDomain);
+      tenantResolved = true;
     }
 
-    if (!tokenTenant && !headerTenant && !tenantSlugHeader && !hostTenantSlug) {
+    if (!tokenTenant && !headerTenant && !tenantResolved) {
       throw new BadRequestException("Tenant nao informado.");
     }
 
@@ -143,6 +178,49 @@ export class TenancyMiddleware implements NestMiddleware {
     const host = hostHeader.split(":")[0];
     const [subdomain] = host.split(".");
     return subdomain?.trim() || undefined;
+  }
+
+  /** Retorna candidatos para match por domain: host completo (com porta), hostname (sem porta), subdominio se houver. */
+  private getHostForDomain(req: FastifyRequest): string[] | undefined {
+    const hostHeader = req.headers.host;
+    if (!hostHeader || typeof hostHeader !== "string") {
+      return undefined;
+    }
+    const raw = hostHeader.trim();
+    if (!raw) return undefined;
+    const hostname = raw.split(":")[0].trim();
+    const parts = hostname.split(".");
+    const subdomain = parts.length > 1 ? parts[0].trim() : undefined;
+    const candidates = [raw, hostname];
+    if (subdomain && !candidates.includes(subdomain)) {
+      candidates.push(subdomain);
+    }
+    return candidates.length > 0 ? candidates : undefined;
+  }
+
+  /** Garante que existe um tenant cujo campo domain (lista separada por virgula) contem um dos candidatos. */
+  private async ensureTenantByDomain(hostCandidates: string[]) {
+    if (hostCandidates.length === 0) {
+      throw new BadRequestException("Code 7: Tenant nao encontrado");
+    }
+    for (const candidate of hostCandidates) {
+      const normalized = candidate.toLowerCase().trim();
+      if (!normalized) continue;
+      const result = await this.pool.query<{ id: number }>(
+        `SELECT id FROM tenants
+         WHERE domain IS NOT NULL AND domain != ''
+         AND EXISTS (
+           SELECT 1 FROM unnest(string_to_array(trim(both from domain), ',')) AS d(v)
+           WHERE lower(trim(d.v)) = $1
+         )
+         LIMIT 1`,
+        [normalized]
+      );
+      if ((result.rowCount ?? 0) > 0) {
+        return;
+      }
+    }
+    throw new BadRequestException("Code 7: Tenant nao encontrado");
   }
 
   private async ensureTenantExists(value: string, field: "id" | "slug") {
