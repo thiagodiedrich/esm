@@ -274,10 +274,10 @@ export async function apiRequest<T>(
       throw error;
     }
     
-    // Handle other errors
+    // Handle other errors (400, 404, 500, etc.) — temos resposta da API, usar mensagem do body
     if (!response.ok) {
       const errorType = classifyError(response.status);
-      
+
       // Retry if retryable and under limit
       if (isRetryable(errorType) && retryCount < MAX_RETRIES) {
         const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
@@ -318,7 +318,7 @@ export async function apiRequest<T>(
     
     return response.json();
   } catch (error) {
-    // Network error (incl. AbortError por timeout)
+    // Erro de comunicacao: so quando nao ha resposta (fetch falhou, timeout, CORS bloqueou)
     const isAbort = error instanceof Error && error.name === 'AbortError';
     const isNetwork = error instanceof TypeError && error.message.includes('fetch');
     if (isAbort || isNetwork) {
